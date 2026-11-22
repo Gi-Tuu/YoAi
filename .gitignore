@@ -1,0 +1,56 @@
+# YoAi 本地产物（个人状态，含隐私，不提交）
+output/
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# 构建产物（105M + 82M，不入库）
+build/
+dist/
+*.spec.bak
+
+# 评测产物与数据（64M + 15M，逐题数据本地留存 / 可从官方源重下）
+bench_results/
+bench_data/
+
+# 凭据与本地配置（绝不入库）
+.env
+.env.*
+*.env
+!.env.example
+*_key.txt
+*.pem
+*.key
+
+# IDE / 编辑器 / 系统
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 项目工作记忆（本地协作状态，不入库）
+.workbuddy/memory/
+
+# 日志与临时文件
+*.log
+*.tmp
+*.bak
+~$*
+
+# 说明：保留在仓库内的——
+# src/、tests/、bench/（脚本）、docs/、examples/、tools/、
+# build_exe.py、pyproject.toml、yoai.spec、README.md、
+# LICENSE、CLA.md、CONTRIBUTING.md
