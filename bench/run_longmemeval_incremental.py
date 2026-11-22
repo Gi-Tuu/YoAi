@@ -70,6 +70,7 @@ def _flat_turns(case: dict) -> list[dict[str, str]]:
 
 async def _write_incremental(
     case: dict, tmem: TemporalMemory, out_dir: Path, temperature: float = 0.1,
+    max_chars: int = 0,
 ) -> tuple[int, int, int]:
     """逐条写入：每条消息一次模型调用，模型只看到这一条。返回(写入条数, 调用次数, 触发条数)。"""
     turns = _flat_turns(case)
@@ -92,7 +93,9 @@ async def _write_incremental(
         agent.core.registry = only
 
         # 输入带日期前缀，让模型给 event_time
-        msg = f"[{turn['date']}] {turn['role']}: {turn['content'][:600]}"
+        # max_chars<=0 表示不截断（修复助手长列表后半段答案被砍掉的 bug）
+        content = turn['content'] if max_chars <= 0 else turn['content'][:max_chars]
+        msg = f"[{turn['date']}] {turn['role']}: {content}"
         calls = 0
         async for event in agent.astream(TURN_PROMPT.format(msg=msg)):
             if event.type == EventType.TOOL_CALL:
@@ -131,9 +134,9 @@ async def _answer(case: dict, out_dir: Path, tmem: TemporalMemory) -> tuple[str,
     return final.strip(), {"tool_calls": tool_calls}
 
 
-async def _answer_one(case: dict, out_dir: Path, temperature: float) -> tuple[str, dict]:
+async def _answer_one(case: dict, out_dir: Path, temperature: float, max_chars: int = 0) -> tuple[str, dict]:
     tmem = TemporalMemory(out_dir / "tmem.json")
-    written, calls, triggered = await _write_incremental(case, tmem, out_dir, temperature)
+    written, calls, triggered = await _write_incremental(case, tmem, out_dir, temperature, max_chars)
     answer, answer_meta = await _answer(case, out_dir, tmem)
     return answer, {
         "events_recorded": written, "write_calls": calls, "triggered": triggered,
@@ -150,6 +153,9 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=20261121)
     ap.add_argument("--temperature", type=float, default=0.1,
                     help="单轮写入温度（单轮场景默认/0.1无差别，保持0.1）")
+    ap.add_argument("--max-chars", type=int, default=0,
+                    help="写入时每条消息截断长度；默认0=不截断（600是旧bug值，"
+                         "会砍掉助手长列表后半段答案：A/B 66.7%%→96.7%%, p=0.0039）")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -165,6 +171,7 @@ def main() -> int:
         "split": "oracle", "question_type": args.type, "n": len(sample), "seed": args.seed,
         "answer_model": "deepseek/deepseek-v4.1-flash-1017 (suanli.cn, free)",
         "write_temperature": args.temperature,
+        "max_chars": args.max_chars,
         "write": "each haystack turn -> one model call -> remember_event (逐条递增)",
         "answer": "same as batch version (question_date + tool retrieval)",
         "note": "写入阶段逐条(生产形态)，答题阶段与批量版逐字一致",
@@ -197,7 +204,7 @@ def main() -> int:
         case_dir = out / f"case_{i}"
         case_dir.mkdir(exist_ok=True)
         try:
-            answer, meta = asyncio.run(_answer_one(case, case_dir, args.temperature))
+            answer, meta = asyncio.run(_answer_one(case, case_dir, args.temperature, args.max_chars))
         except Exception as exc:
             answer, meta = "", {"error": f"{type(exc).__name__}: {exc}"}
         trace = {
