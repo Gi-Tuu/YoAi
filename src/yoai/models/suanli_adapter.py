@@ -95,6 +95,16 @@ class SuanliAdapter(PeerAdapter):
 
     def _config(self) -> tuple[str, str, str]:
         env = read_env_file(self.env_path)
+        # 环境变量覆盖：仅当显式设置时才生效，用于评测切换网关而不改桌面默认配置。
+        # 三个变量必须同时设置才整体覆盖，避免只改了 key 却用旧 base_url 的错配。
+        override = (
+            os.environ.get("YOAI_BASE_URL"),
+            os.environ.get("YOAI_API_KEY"),
+            os.environ.get("YOAI_MODEL"),
+        )
+        if all(override):
+            base, key, model = override
+            return base.rstrip("/"), key, model
         return (
             env.get("OPENAI_BASE_URL", "").rstrip("/"),
             env.get("OPENAI_API_KEY", ""),

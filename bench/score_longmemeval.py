@@ -78,8 +78,15 @@ def judge(prompt: str) -> tuple[bool, str]:
     env = read_env_file(CORE_ENV)
     base = env.get("OPENAI_BASE_URL", "").rstrip("/")
     key = env.get("OPENAI_API_KEY", "")
+    judge_model = JUDGE_MODEL
+    # 环境变量覆盖（与 run_longmemeval_incremental.py 对称）：换网关时 judge 也跟着切。
+    # 三个变量必须同时设置才整体覆盖；YOAI_JUDGE_MODEL 单独覆盖模型 ID（网关模型名格式不同）。
+    if os.environ.get("YOAI_BASE_URL") and os.environ.get("YOAI_API_KEY"):
+        base = os.environ["YOAI_BASE_URL"].rstrip("/")
+        key = os.environ["YOAI_API_KEY"]
+        judge_model = os.environ.get("YOAI_JUDGE_MODEL", judge_model)
     payload = {
-        "model": JUDGE_MODEL,
+        "model": judge_model,
         "messages": [{"role": "user", "content": prompt}],
         "n": 1, "temperature": 0,
         # 官方脚本用 max_tokens=10（gpt-4o 够）；deepseek 是思考模型，
