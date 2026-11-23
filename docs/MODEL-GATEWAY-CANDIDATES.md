@@ -103,6 +103,20 @@
 **判断**：**当前不可用**（网关 502）。恢复后优先测 `openai/gpt-6-luna`（最便宜）和 `openai/gpt-5.6-luna`（工具兼容最好）的 tool_calls。
 即使可用，换模型后结果**无法与 87.2% 对比**（不同 evaluated system），要重跑全量建新基线。
 
+### 🟢 阿里云百炼（2026-11-23 实测通过，可接入）
+
+| 项 | 实测结果 |
+|---|---|
+| 端点 | `https://dashscope.aliyuncs.com/compatible-mode/v1`（OpenAI 兼容） |
+| 可用模型 | `qwen-flash`、`qwen-plus`、`qwen-max` 均 HTTP 200；`qwen-turbo` 限流、`qwen3-*` 无权限 |
+| **tool_calls** | **✅ 完美支持**——强制触发下 finish_reason=`tool_calls`，返回标准 `remember_event` 工具调用（参数在 `arguments` JSON 字符串里） |
+| 响应 | 0.5s（很快） |
+| 注意 | `/models` 端点不可用（404/空），模型 ID 从控制台或上面列表取 |
+| 注册 | 用户已领到 key（sk-ws- 开头） |
+
+**判断**：技术上**可以直接接 YoAi**（端点+工具调用都验证过）。但 qwen ≠ deepseek，
+换模型后成绩不能与 87.2% 对比。适合作为生产/开发的稳定备用网关（国内直连、快、官方平台）。
+
 ### 补充：四个指定平台的直达地址与核实状态（2026-11-23）
 
 | 平台 | 注册地址 | API 端点 | 免费额度 | 核实状态 | YoAi 适配 |
