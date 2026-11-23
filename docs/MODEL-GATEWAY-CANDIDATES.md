@@ -103,6 +103,17 @@
 **判断**：**当前不可用**（网关 502）。恢复后优先测 `openai/gpt-6-luna`（最便宜）和 `openai/gpt-5.6-luna`（工具兼容最好）的 tool_calls。
 即使可用，换模型后结果**无法与 87.2% 对比**（不同 evaluated system），要重跑全量建新基线。
 
+### 🟢 阿里云百炼 · 全模型清单抓取（2026-11-23）
+
+用 API key 调 `https://dashscope.aliyuncs.com/api/v1/models?page_no=N&page_size=20` 翻页，
+抓到**全部 382 个模型**（含价格/特性/上下文），原始数据在 `bench_results/bailian_models.json`。
+- **19 个 deepseek 系列**：`deepseek-v4.1-flash-1017`（评测同款）、`deepseek-v4.1-flash`、
+  `deepseek-v4-pro`（¥12/¥24）、`vanchin/deepseek-*`、`siliconflow/deepseek-*` 等
+- **110 个支持 function-calling**（YoAi 可用）；最便宜：
+  `tongyi-xiaomi-analysis-flash`（¥0.2/¥0.4）、`qwen-plus-2025-*`（¥0.8/¥2.0）
+- **注意**：账号"有免费额度的 74 个模型"是控制台维度信息，API 不返回，
+  需从浏览器控制台看（本次未抓，尊重登录态）
+
 ### 🟢 阿里云百炼（2026-11-23 实测通过，可接入）
 
 | 项 | 实测结果 |
