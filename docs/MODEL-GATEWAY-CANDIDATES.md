@@ -108,14 +108,16 @@
 | 项 | 实测结果 |
 |---|---|
 | 端点 | `https://dashscope.aliyuncs.com/compatible-mode/v1`（OpenAI 兼容） |
-| 可用模型 | `qwen-flash`、`qwen-plus`、`qwen-max` 均 HTTP 200；`qwen-turbo` 限流、`qwen3-*` 无权限 |
-| **tool_calls** | **✅ 完美支持**——强制触发下 finish_reason=`tool_calls`，返回标准 `remember_event` 工具调用（参数在 `arguments` JSON 字符串里） |
-| 响应 | 0.5s（很快） |
-| 注意 | `/models` 端点不可用（404/空），模型 ID 从控制台或上面列表取 |
+| 可用模型 | 🟢 **`deepseek-v4.1-flash-1017`（评测同款！）**、`deepseek-v4.1-flash`、`qwen-flash`、`qwen-plus`、`qwen-max` 均 HTTP 200；`qwen-turbo` 限流、`qwen3-*` 无权限、`deepseek-v4-pro` 免费额度已耗尽 |
+| **tool_calls** | **✅ 完美支持**——强制触发下 finish_reason=`tool_calls`，返回标准 `remember_event` 调用；deepseek-v4.1-flash-1017 和 qwen-flash/plus 都验证过 |
+| 响应 | 0.5-0.8s（很快） |
+| 注意 | 模型 ID 用**小数点** `deepseek-v4.1-flash-1017`（连字符版 `deepseek-v4-1-flash-1017` 不存在）；`/models` 端点不可用（404/空）；默认开思考（reasoning_content 占 max_tokens，调大到 1024+） |
 | 注册 | 用户已领到 key（sk-ws- 开头） |
 
-**判断**：技术上**可以直接接 YoAi**（端点+工具调用都验证过）。但 qwen ≠ deepseek，
-换模型后成绩不能与 87.2% 对比。适合作为生产/开发的稳定备用网关（国内直连、快、官方平台）。
+**判断**：**这是今天所有候选里唯一能保住 87.2% 可比性的替代网关**——
+`deepseek-v4.1-flash-1017` 正是评测用的同款模型，换上去后分数口径不变。
+百炼是官方平台、国内直连、响应快、有免费额度。**强烈建议作为算里到期后的评测/生产首选迁移目标。**
+唯一注意：debug 时要确认路由到的是 deepseek 而非 qwen（模型 ID 写死）。
 
 ### 补充：四个指定平台的直达地址与核实状态（2026-11-23）
 
