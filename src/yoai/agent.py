@@ -49,10 +49,13 @@ class YoAiAgent:
         outcome_verifier: Any = "auto",
         temporal_memory: bool | Any = True,
         tool_filter: Any = None,
+        memory_fallback: bool = False,
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
         过滤可用工具（专家白名单接线）。None 或返回 None 表示不限制。默认不启用，
-        生产行为完全不变。就地修改 registry 对象以保持 loop 持有的引用一致。"""
+        生产行为完全不变。就地修改 registry 对象以保持 loop 持有的引用一致。
+        memory_fallback: 阶段B——模型本轮一个记忆都没写时，是否用确定性规则兜底。
+        默认 False（保守，不改既有行为）；验证后再决定是否设默认。"""
         data_dir = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
         self.context = PersonalContext(data_dir / "context.json")
         self.goals = GoalManager(data_dir / "goals.json")
@@ -64,6 +67,7 @@ class YoAiAgent:
             self.temporal_memory = TemporalMemory(data_dir / "temporal_memory.json")
         else:
             self.temporal_memory = temporal_memory   # 允许注入自定义实例
+        self.memory_fallback = bool(memory_fallback)
         self.capabilities = PersonalCapabilities(
             self.context, self.goals, self.temporal_memory
         )
@@ -130,12 +134,44 @@ class YoAiAgent:
         from yoai.temporal_memory import TemporalMemory
         return TemporalMemory._empty_write_stats()
 
+    @staticmethod
+    def _has_memory_worthy_fact(text: str) -> bool:
+        """保守判定：一段用户话里是否有值得记忆的个人事实。
+
+        只防"寒暄/提问被当事实记"，不做完整事实抽取（那是 remember_from_transcript 的事）。
+        命中任一：第一人称事实陈述（I'm/I have/my.../我叫/我喜欢）、数字、明确偏好动词。
+        """
+        import re
+        s = text.strip()
+        if len(s) < 8:
+            return False
+        return bool(re.search(
+            r"\b(I'm|I am|I have|I've|I like|I love|I prefer|I work|I live|I'm from|"
+            r"my (name|birthday|favorite|favourite|job|home|family|cat|dog|car|hobby)|"
+            r"remember that|keep in mind|别忘了|记住|我叫|我喜欢|我在|我有)\b",
+            s, re.IGNORECASE,
+        )) or bool(re.search(r"\d", s))
+
     async def astream(self, task: str):
         """驱动 Core 执行任务，逐条透出内核事件（不改动事件语义）。"""
         self.reset_write_stats()   # 旁路：本轮写入统计清零
         self._apply_tool_filter(task)
+        final_text = ""
         async for event in self.core.astream(task):
+            if event.type == EventType.DONE:
+                final_text = str((event.data or {}).get("final_text", ""))
             yield event
+        # 阶段B：模型本轮一个都没记 + 用户话有事实 → 确定性兜底（保守 opt-in）
+        if (self.memory_fallback and self.temporal_memory is not None
+                and self.last_write_stats()["events"] == 0
+                and self._has_memory_worthy_fact(task)):
+            turns = [{"role": "user", "content": task}]
+            if final_text:
+                turns.append({"role": "assistant", "content": final_text})
+            try:
+                self.temporal_memory.remember_from_transcript(turns)
+            except Exception:  # noqa: BLE001 - 兜底失败不能反噬主任务
+                pass
 
     @staticmethod
     def is_done(event: Any) -> bool:
