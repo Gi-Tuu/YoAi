@@ -34,7 +34,16 @@ def _core_env():
     src = os.environ.get("YAI_CORE_SRC")
     if src:
         return Path(src).expanduser() / ".env"
-    return Path(__file__).resolve().parents[2] / ".env"
+    # 默认回退：先试项目父目录（E:\agent\.env），不存在则用绑定的 Core 目录。
+    # 历史上评分依赖环境变量 YAI_CORE_SRC，新 shell 未设时会误指向不存在的
+    # E:\agent\.env，导致 judge base_url 为空 → ValueError: unknown url type。
+    fallback = Path(__file__).resolve().parents[2] / ".env"
+    if fallback.exists():
+        return fallback
+    core_env = Path(r"E:\Competition\YAI Agent Core") / ".env"
+    if core_env.exists():
+        return core_env
+    return fallback
 
 
 CORE_ENV = _core_env()
