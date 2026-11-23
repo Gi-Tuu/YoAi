@@ -71,12 +71,15 @@
 | 支持模型 | 官网列 OpenAI/Claude/Gemini/**DeepSeek**/Grok/Qwen/Mistral/Llama |
 | API 能力 | 对话补全、图像生成、文本补全、语音音频、嵌入、批处理（tool_calls 未明确写，需实测） |
 | **$100 额度** | **官网查无此条款**——首页/pricing/注册页都只写 Starter $0（"基础请求额度"无数字）、Growth $199/月，且标注"模板展示，以控制台为准" |
-| 可能的来源 | 注册页有 **Promo Code 字段**——"送$100"可能是某推广码/邀请码的优惠，非默认政策；网上"注册送100美元"文章说的是另一个平台（需绑卡实名），与本站对不上 |
+| 可能的来源 | 注册页有 **Promo Code 字段**——"送$100"经 Promo Code 领到（用户已领） |
 | 注册 | 邮箱+密码，Promo Code 可选；无需手机/信用卡（页面未见） |
 | 性质 | **第三方聚合中转网关**（Sub2API 类），非模型官方；有智能路由、故障转移、用量面板 |
+| **实测结果（2026-11-23）** | key 有效（非401），端点 `https://www.novapis.com/v1/chat/completions` 正确；**模型 ID 必须带 `openai/` 前缀+后缀**（如 `openai/gpt-5.6-sol`、`openai/gpt-6-luna`、`openai/gpt-6.2-astra`）；`/v1/models` 端点 404（网关未实现，尽管错误提示让它去看） |
+| **⚠️ 致命问题** | 用真实模型 ID 调用全部返回 **HTTP 403 `Insufficient account balance`**——**领到的 $100 未到账，或这些 GPT-5.6/6.x 模型不在免费范围**。tool_calls 因余额不足**未能实测** |
 
-**判断**：技术形态可用（OpenAI 兼容 + DeepSeek），但"送$100"**未经证实**，别按"到手 $100"规划评测预算。
-若要试：注册时填 Promo Code，到账后立即在控制台确认余额与有效期；实测 tool_calls 后再决定是否接。
+**判断**：**当前不可用**。余额问题不解决，接入无从谈起。且列表全是 GPT-5.6/6.x 新模型——
+即使可用也**比当前 deepseek 贵一个量级**，且换模型后结果无法与 87.2% 对比（评测口径变了）。
+下一步：你在控制台确认 $100 是否真的到账、到账在哪个模型分组；若有其它便宜模型（deepseek 类）再测。
 中转网关的隐私/可靠性风险自担（见 C 级说明）。
 
 ### 补充：四个指定平台的直达地址与核实状态（2026-11-23）
@@ -86,7 +89,7 @@
 | **Mistral** | https://console.mistral.ai | `https://api.mistral.ai/v1` | Free层 $10/月（或Experiment层约1B token/月，说法不一） | ✅ OpenAI兼容 Chat Completions、**tool_calls 支持**、免信用卡（需手机号验证）；模型如 `mistral-small-4`、`deepseek-v4-1-flash-1017`（$0.30/$1.20） | **✅ 四者中唯一可接** |
 | **LongCat（美团）** | https://longcat.chat/ | 需注册后控制台确认 | 每日 5000 万 token | ⚠️ 官网无公开 API 端点文档，需注册看控制台 | 待核实 |
 | **SenseNova（商汤）** | https://www.sensenova.cn/ | 需注册后控制台确认 | 每模型 1500次/5小时、60RPM | ⚠️ 官网首页仅产品介绍，API 端点需注册后看 | 待核实 |
-| **Cohere** | https://dashboard.cohere.com/api-keys | `https://api.cohere.com/compatibility/v1` | Trial key 1000次/月、20RPM | ✅ OpenAI兼容端点、**tool_calls 支持**、免信用卡 | ❌ **条款禁用中国大陆/港澳**（同 packet.ai） |
+| **Cohere** | https://dashboard.cohere.com/api-keys | `https://api.cohere.com/compatibility/v1` | Trial key 1000次/月、20RPM | ✅ **免费试用属实**（用户确认+多源核实）、OpenAI兼容端点、**tool_calls 支持**、免信用卡免手机 | ❌ **条款禁用中国大陆/港澳**（同 packet.ai）——免费是真的但不能合规使用 |
 
 > Mistral 注意：手机号验证必须有；免费层数据在部分地区可能用于改进模型。
 > Cohere 注意：OpenAI 兼容端点是 `/compatibility/v1`，原生 API 是 `/v2`（响应结构不同，别混用）。
@@ -110,4 +113,17 @@
 验证通过后，只需改 `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `LLM_MODEL` 三行，代码零改动。
 不建议在评测进行中切换——会在同一批结果里混入不同模型，破坏可比性。
 
-> 注：以上信息为搜罗结果，未经实测；免费政策和端点随时可能调整，以各平台官方页面为准。
+## 五、⚠️ 换网关 = 换模型 = 成绩不可比（最重要）
+
+当前权威成绩 **87.2%** 是在 `deepseek/deepseek-v4.1-flash-1017` 上跑出来的。
+任何新网关若提供的是**不同模型**（如 novapis 只有 GPT-5.6/6.x），切换后：
+
+- 记忆抽取行为变（tool_calls 格式、工具选择倾向、自记稳定性都不同）
+- 答案质量变 → **新分数不能和 87.2% 比**，等于换了一个 evaluated system
+
+**正确做法**：
+1. 优先找**同系列 deepseek** 的网关（Mistral 平台的 `deepseek-v4-1-flash-1017` $0.30/$1.20 就是同系列）
+2. 若不得不用不同模型，必须**重新跑全量 500 题**建立新基线，并标注"不同模型口径"
+3. 绝不在同一批评测里混用两个网关/模型（破坏可比性）
+
+> 注：以上信息为搜罗结果，部分经 API 实测（novapis），部分待注册后验证；免费政策和端点随时可能调整，以各平台官方页面为准。
