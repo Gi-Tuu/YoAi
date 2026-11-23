@@ -147,14 +147,22 @@ class YoAiAgent:
         """
         import re
         s = text.strip()
-        if len(s) < 8:
-            return False
-        return bool(re.search(
+        # 中英文事实信号：第一人称所有格/亲属/偏好/居住/工作 + 中文数字（一二三…）。
+        # 注意 \b 对中文无效（中文紧邻标点也算边界，但紧跟汉字时 \\b 会失效），故中文模式不用 \b。
+        en = re.search(
             r"\b(I'm|I am|I have|I've|I like|I love|I prefer|I work|I live|I'm from|"
             r"my (name|birthday|favorite|favourite|job|home|family|cat|dog|car|hobby)|"
-            r"remember that|keep in mind|别忘了|记住|我叫|我喜欢|我在|我有)\b",
-            s, re.IGNORECASE,
-        )) or bool(re.search(r"\d", s))
+            r"remember that|keep in mind)\b", s, re.IGNORECASE)
+        zh = re.search(
+            r"(我叫|我(叫|是|有|在|喜欢|爱|住在|住|养|工作在|来自|生日|最爱|偏好|的家)|"
+            r"我的(名字|生日|爱好|家人|猫|狗|车|工作|家)|记住|别忘了|请记)", s)
+        # 阿拉伯数字或中文数字+亲属/物品量词（如"三个姐妹"）
+        num = bool(re.search(r"\d", s)) or bool(re.search(
+            r"[一二三四五六七八九十两]\s*(个|位|只|条|本|岁|姐妹|兄弟|孩子|猫|狗)", s))
+        if not (en or zh or num):
+            return False
+        # 有明确事实信号时，短中文句（"我叫小明"）也算；无信号的长句仍需18字符防寒暄误记
+        return len(s) >= 4
 
     async def astream(self, task: str):
         """驱动 Core 执行任务，逐条透出内核事件（不改动事件语义）。"""
