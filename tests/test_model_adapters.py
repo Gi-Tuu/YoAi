@@ -148,6 +148,35 @@ def test_transport_error(monkeypatch):
         assert r2.ok is False and "连接失败" in r2.detail
 
 
+def test_transport_retry_then_success(monkeypatch, tmp_path):
+    """transport 抖动应重试，HTTP 错误不应重试（避免放大限流）。"""
+    import yoai.models.suanli_adapter as mod
+    from yoai.models.http_base import ModelHTTPError, ModelTransportError
+
+    p = tmp_path / ".env"
+    p.write_text("OPENAI_BASE_URL=https://fake\nOPENAI_API_KEY=k\nLLM_MODEL=m\n", encoding="utf-8")
+
+    # transport 失败2次后成功 → 共3次尝试
+    calls = []
+    def flaky(url, payload, headers, timeout):
+        calls.append(url)
+        if len(calls) < 3:
+            raise ModelTransportError("simulated timeout")
+        return {"choices": [{"message": {"content": "ok"}}]}
+    monkeypatch.setattr(mod, "post_json", flaky)
+    r = SuanliAdapter(env_path=p, transport_retries=2).send("hi")
+    assert r.ok is True and len(calls) == 3
+
+    # HTTP 429 不应重试 → 只1次
+    calls.clear()
+    def rate_limited(url, payload, headers, timeout):
+        calls.append(url)
+        raise ModelHTTPError(429, "rate limited")
+    monkeypatch.setattr(mod, "post_json", rate_limited)
+    r2 = SuanliAdapter(env_path=p, transport_retries=3).send("hi")
+    assert r2.ok is False and "429" in r2.detail and len(calls) == 1
+
+
 def test_missing_config_is_unavailable(tmp_path):
     a = SuanliAdapter(env_path=tmp_path / "missing.env")
     assert a.available() is False

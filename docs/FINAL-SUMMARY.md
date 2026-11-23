@@ -134,7 +134,7 @@ assistant 类从 66.7%→96.7%（30题 p=0.0039 极显著）。
 
 ## 六、验证记录（真跑）
 
-- 全量 pytest：**187 passed, 39 warnings**
+- 全量 pytest：**188 passed, 39 warnings**
 - 原 Core：git status 仅两个工作前就存在的未跟踪文件，本轮零改动
 - 所有文档 UTF-8 无 BOM、乱码 0
 - 关键 A/B 均全量 500 题 + McNemar 检验（不是小样本）

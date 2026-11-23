@@ -21,7 +21,7 @@ from yoai.models.http_base import (  # noqa: E402
 )
 
 CORE_ENV = Path(r"E:\Competition\YAI Agent Core") / ".env"
-LEVELS = [1, 2, 4, 8, 16, 32]
+LEVELS = [1, 4, 8, 16, 32]
 # 每档请求数必须远大于最大并发数，否则高档位 worker 空转、测不出上限。
 # 旧版 PER_LEVEL=8 导致"16路"只提交8个任务(一半worker空闲)，
 # 得出"8路甜蜜点"是测试设计假象，非网关真实上限。

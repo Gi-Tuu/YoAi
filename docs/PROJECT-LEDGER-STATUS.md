@@ -25,7 +25,7 @@
 | judge 环境 | env 回退 bug 已修（加 Core 目录回退） | score_longmemeval.py |
 | 进化机制 | 接线完成，价值未证实，暂停 | EVOLUTION-WIRING.md |
 | assistant 弱项 | 根因（截断）已修，专项 96.7%；剩余波动来自自记随机性 | — |
-| 全量测试 | 187 passed, 39 warnings | — |
+| 全量测试 | 188 passed, 39 warnings | — |
 
 ## C. 工程与对外
 

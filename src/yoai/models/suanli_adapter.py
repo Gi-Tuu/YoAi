@@ -79,6 +79,7 @@ class SuanliAdapter(PeerAdapter):
         timeout_s: float = 60.0,
         max_tokens: int = 1024,
         temperature: float | None = None,
+        transport_retries: int = 2,
     ) -> None:
         super().__init__(name, enabled=enabled, timeout_s=timeout_s)
         self.env_path = Path(env_path)
@@ -86,6 +87,10 @@ class SuanliAdapter(PeerAdapter):
         # None=不传该字段（保持网关默认与既有行为）；显式值用于稳定抽取实验。
         # AMBRACE extractor.py:582 用 temperature=0.1 做记忆抽取，借鉴此思路。
         self.temperature = temperature
+        # 仅 transport 错误重试：网关负载高时连接超时是随机抖动（实测中午低价时段
+        # 连1路都会偶发 transport 错误），重试可避免评测/生产丢那条记忆。
+        # HTTP 错误（429/401/5xx）不重试，避免放大限流或配置问题。
+        self.transport_retries = max(0, transport_retries)
         self.last_status = ""
 
     def _config(self) -> tuple[str, str, str]:
@@ -133,19 +138,35 @@ class SuanliAdapter(PeerAdapter):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        try:
-            data = post_json(
-                base + "/chat/completions", payload,
-                {"Authorization": "Bearer " + key}, self.timeout_s,
-            )
-        except ModelHTTPError as exc:
-            self.last_status = f"http_{exc.status}"
+        data = None
+        http_error: ModelHTTPError | None = None
+        transport_error: ModelTransportError | None = None
+        for attempt in range(self.transport_retries + 1):
+            try:
+                data = post_json(
+                    base + "/chat/completions", payload,
+                    {"Authorization": "Bearer " + key}, self.timeout_s,
+                )
+                break   # 成功，跳出重试
+            except ModelHTTPError as exc:
+                http_error = exc   # HTTP 错误（429/401/5xx）不重试，避免放大限流/配置问题
+                break
+            except ModelTransportError as exc:
+                transport_error = exc
+                if attempt >= self.transport_retries:
+                    break
+                # 指数退避：0.5s / 1s / 2s…，避免给高负载网关雪上加霜
+                import time as _time
+                _time.sleep(0.5 * (2 ** attempt))
+        if http_error is not None:
+            self.last_status = f"http_{http_error.status}"
             return AdapterResult(False, level=self.level,
-                                 detail=friendly_http_error(exc.status, exc.message),
-                                 meta={"http_status": exc.status})
-        except ModelTransportError as exc:
+                                 detail=friendly_http_error(http_error.status, http_error.message),
+                                 meta={"http_status": http_error.status})
+        if data is None:
             self.last_status = "transport_error"
-            return AdapterResult(False, level=self.level, detail=f"网关连接失败：{exc}")
+            detail = f"网关连接失败：{transport_error}" if transport_error else "网关连接失败"
+            return AdapterResult(False, level=self.level, detail=detail + "（已重试）")
 
         text, usage = _extract_text(data)
         tool_calls = _extract_tool_calls(data)
