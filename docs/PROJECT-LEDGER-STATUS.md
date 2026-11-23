@@ -6,12 +6,13 @@
 
 | 项 | 当前状态 | 出处 |
 |---|---|---|
-| 权威成绩 | **82%–94% 区间**（100题，中位约88%） | FINAL-SUMMARY.md |
-| 成绩口径 | 单轮递增写入 + 不截断（真实生产形态）；同配置两次运行 94%/82%，波动 ±12pp | INCREMENTAL-EVAL-PROTOCOL.md |
+| 权威成绩 | **87.2%（436/500）**，Wilson CI 84.0–89.8% | FINAL-SUMMARY.md |
+| 成绩口径 | 单轮递增 + 不截断 + 全量；新代码段 88.2%（351/398），前102题旧段 83.3% | bench_results/lme-inc-500-fix/ |
+| 分题型 | assistant 100%、user 98.6%、knowledge 87.2%、temporal 85.7%、preference 80%、multi 78.9% | — |
 | 确定性铁证 | assistant 专项 A/B 66.7%→96.7%，修对9/弄坏0，p=0.0039 | ASSISTANT-ROOT-CAUSE-BREAKTHROUGH.md |
 | 批量口径（历史） | 71.8%（500题，低温）/ 63.0% 对照；非产品真实水平 | SELF-MEMORY-STABILITY.md |
-| 最新评测产物 | `bench_results/lme-inc-100-fix/`（94%）、`lme-inc-500-fix/` 前100题（82%） | — |
-| 500题全量 | 未跑完（停在约100题） | — |
+| 最新评测产物 | `bench_results/lme-inc-500-fix/`（全量500题最终成绩） | — |
+| 500题全量 | **已完成**（2026-11-23，免费额度最后一天） | — |
 | 评测提速 | **已完成**：题内并发8路(3.8-6.7×)+judge并发8路(6×)，500题17h→2.5-4.5h，等价性验证通过 | BENCH-SPEED-OPTIMIZATION-PLAN.md |
 
 ## B. 技术状态
