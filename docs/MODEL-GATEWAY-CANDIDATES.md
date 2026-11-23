@@ -74,13 +74,34 @@
 | 可能的来源 | 注册页有 **Promo Code 字段**——"送$100"经 Promo Code 领到（用户已领） |
 | 注册 | 邮箱+密码，Promo Code 可选；无需手机/信用卡（页面未见） |
 | 性质 | **第三方聚合中转网关**（Sub2API 类），非模型官方；有智能路由、故障转移、用量面板 |
-| **实测结果（2026-11-23）** | key 有效（非401），端点 `https://www.novapis.com/v1/chat/completions` 正确；**模型 ID 必须带 `openai/` 前缀+后缀**（如 `openai/gpt-5.6-sol`、`openai/gpt-6-luna`、`openai/gpt-6.2-astra`）；`/v1/models` 端点 404（网关未实现，尽管错误提示让它去看） |
-| **⚠️ 致命问题** | 用真实模型 ID 调用全部返回 **HTTP 403 `Insufficient account balance`**——**领到的 $100 未到账，或这些 GPT-5.6/6.x 模型不在免费范围**。tool_calls 因余额不足**未能实测** |
+| **实测结果（2026-11-23）** | 端点 `https://www.novapis.com/v1/chat/completions` 正确；**模型 ID 带 `openai/` 前缀+后缀**（`openai/gpt-5.6-sol/terra/luna`、`openai/gpt-6-sol/luna`、`openai/gpt-6.1-sol/terra`、`openai/gpt-6.2-astra`）；`/v1/models` 端点 404（网关未实现） |
+| 余额问题 | 第一个 key 用真实 ID 返回 HTTP 403 `Insufficient account balance`；换第二个 key 后网关持续 **502 Bad Gateway**（平台侧故障，非 key/余额/模型问题）——**尚未成功发出一次请求** |
 
-**判断**：**当前不可用**。余额问题不解决，接入无从谈起。且列表全是 GPT-5.6/6.x 新模型——
-即使可用也**比当前 deepseek 贵一个量级**，且换模型后结果无法与 87.2% 对比（评测口径变了）。
-下一步：你在控制台确认 $100 是否真的到账、到账在哪个模型分组；若有其它便宜模型（deepseek 类）再测。
-中转网关的隐私/可靠性风险自担（见 C 级说明）。
+### 官方价格（每百万 token，多源交叉验证 2026-11）
+
+| 模型 | 官方输入/输出 | 缓存输入 | 全量评测估算(2.3M/7M token) |
+|---|---|---|---|
+| gpt-6.2-astra | $8 / $40 | $0.40 | — |
+| gpt-6-astra | $10 / $50 | $1.00 | — |
+| gpt-6.1-sol | $2 / $10 | $0.10 | $8.28 / $25.20 |
+| gpt-6.1-terra | $1 / $5 | $0.05 | $4.14 / $12.60 |
+| gpt-6-sol | $2 / $10 | $0.20 | $8.28 / $25.20 |
+| **gpt-6-luna** | **$0.10 / $0.50** | $0.01 | **$0.41 / $1.26**（最便宜） |
+| gpt-5.6-sol | $4 / $20 | $0.40 | $16.56 / $50.40 |
+| gpt-5.6-terra | $2 / $12 | $0.20 | $4.83 / $14.70 |
+| gpt-5.6-luna | $0.20 / $1.20 | $0.02 | $0.92 / $2.80 |
+
+> 中转站实付价约为官方 14-17%（aiapiprice.com 抽样）；若网关真"1:1 官方价"，luna 跑全量也仅 $0.4-2.8，$100 绰绰有余。**价格不是瓶颈**。
+
+### ⚠️ tool_calls 兼容性大坑（YoAi 生死线）
+
+- **GPT-6 Astra / 6.1 Sol / 6.1 Terra**：tool calling **必须走 Responses API**，Chat Completions 不支持 → YoAi 直接接会调不动工具
+- **GPT-6 Sol / GPT-6 Luna**：Chat Completions 下必须设 `reasoning_effort=none` 才能 function calling
+- **GPT-5.6 全系**：Chat Completions 支持 function calling
+- 结论：即使网关恢复，也要**逐个实测 tool_calls**，不能只看模型名换上去
+
+**判断**：**当前不可用**（网关 502）。恢复后优先测 `openai/gpt-6-luna`（最便宜）和 `openai/gpt-5.6-luna`（工具兼容最好）的 tool_calls。
+即使可用，换模型后结果**无法与 87.2% 对比**（不同 evaluated system），要重跑全量建新基线。
 
 ### 补充：四个指定平台的直达地址与核实状态（2026-11-23）
 
