@@ -176,3 +176,33 @@ def test_assistant_entity_supplement(tmp_path: Path):
     assert n == 2, facts
     assert any("Patagonia" in f for f in facts)
     assert any("Southwest Airlines" in f for f in facts)
+
+
+def test_write_stats_tracks_source_and_reset(tmp_path: Path):
+    """阶段A：写入统计按来源分桶，reset 后清零，不改写入行为。"""
+    m = TemporalMemory(tmp_path / "e.json")
+    # 新实例初始全零
+    assert m.last_write_stats() == {
+        "calls": 0, "events": 0, "model": 0, "fallback": 0, "supplement": 0,
+    }
+    # 模型写入（默认来源）
+    m.remember_event("用户喜欢蓝色")
+    assert m.last_write_stats()["model"] == 1
+    # 兜底写入
+    m.remember_from_transcript([{"role": "user", "content": "I have 2 cats"}])
+    stats = m.last_write_stats()
+    assert stats["fallback"] >= 1, stats
+    # 补充写入
+    m.supplement_number_facts([{"role": "user", "content": "I have 3 sisters"}])
+    stats = m.last_write_stats()
+    assert stats["supplement"] >= 1, stats
+    assert stats["calls"] == stats["events"] == sum(
+        stats[k] for k in ("model", "fallback", "supplement")
+    ), stats
+    # 事实确实写进去了（统计不影响行为）
+    assert m.count() == stats["events"]
+    # reset 清零
+    m.reset_write_stats()
+    assert m.last_write_stats()["events"] == 0
+    assert m.count() == stats["events"]   # reset 只清指标不清记忆
+

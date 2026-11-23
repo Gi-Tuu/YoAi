@@ -114,8 +114,25 @@ class YoAiAgent:
         """列出当前已注册的工具名。"""
         return [t["name"] for t in self.core.list_tools()]
 
+    # --- 写入可观测（阶段A）：透传记忆层统计，不改写入行为 ---
+    def reset_write_stats(self) -> None:
+        """每轮对话开始前清零，使 last_write_stats 只反映本轮。"""
+        if self.temporal_memory is not None and hasattr(self.temporal_memory, "reset_write_stats"):
+            self.temporal_memory.reset_write_stats()
+
+    def last_write_stats(self) -> dict[str, Any]:
+        """本轮写入统计快照（calls/events/model/fallback/supplement）。
+
+        无时间记忆层时返回全零——保持接口稳定，调用方不必判空。
+        """
+        if self.temporal_memory is not None and hasattr(self.temporal_memory, "last_write_stats"):
+            return self.temporal_memory.last_write_stats()
+        from yoai.temporal_memory import TemporalMemory
+        return TemporalMemory._empty_write_stats()
+
     async def astream(self, task: str):
         """驱动 Core 执行任务，逐条透出内核事件（不改动事件语义）。"""
+        self.reset_write_stats()   # 旁路：本轮写入统计清零
         self._apply_tool_filter(task)
         async for event in self.core.astream(task):
             yield event

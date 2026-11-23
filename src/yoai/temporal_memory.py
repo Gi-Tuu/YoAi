@@ -34,7 +34,25 @@ class TemporalMemory:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._events: list[dict[str, Any]] = []
+        # 写入可观测（阶段A）：只计条数/来源，不记内容、不落盘。
+        # 生产侧此前无指标，"模型记0条"会悄悄发生；这里提供基线数据。
+        self.write_stats: dict[str, Any] = self._empty_write_stats()
         self._load()
+
+    @staticmethod
+    def _empty_write_stats() -> dict[str, Any]:
+        return {"calls": 0, "events": 0, "model": 0, "fallback": 0, "supplement": 0}
+
+    def reset_write_stats(self) -> None:
+        """每轮对话开始时清零，使 last_write_stats 反映本轮。"""
+        self.write_stats = self._empty_write_stats()
+
+    def last_write_stats(self) -> dict[str, Any]:
+        """本轮写入快照：总调用/写入条数 + 按来源(model/fallback/supplement)分。
+
+        只读返回副本，调用方改动不影响内部计数。
+        """
+        return dict(self.write_stats)
 
     def _load(self) -> None:
         if not self.path.exists():
@@ -73,6 +91,7 @@ class TemporalMemory:
         tag: str = "",
         topics: list[str] | None = None,
         speaker: str = "user",
+        _source: str = "model",
     ) -> str:
         """记一件事。event_time 是事件发生时间（ISO 8601），缺省用当前时间。
 
@@ -91,6 +110,11 @@ class TemporalMemory:
             "speaker": str(speaker) if speaker in ("user", "assistant") else "user",
         })
         self._save()
+        # 旁路计数：不记内容、不影响写入行为
+        self.write_stats["calls"] += 1
+        self.write_stats["events"] += 1
+        bucket = _source if _source in ("model", "fallback", "supplement") else "model"
+        self.write_stats[bucket] += 1
         return f"已记住事件：{what}"
 
     def events_between(self, start: str, end: str) -> list[dict[str, Any]]:
@@ -223,7 +247,8 @@ class TemporalMemory:
 
             date = str(dates[i]) if i < len(dates) else ""
             topics = topic_extractor(fact) if topic_extractor else []
-            self.remember_event(fact, event_time=date, topics=topics, speaker=role)
+            self.remember_event(fact, event_time=date, topics=topics, speaker=role,
+                                _source="fallback")
             added += 1
 
             # 数字兜底：从整段话（不只 first）抓"数字+名词"，逐字保留原话短语。
@@ -239,7 +264,7 @@ class TemporalMemory:
                     self.remember_event(
                         num_fact, event_time=date,
                         topics=(topic_extractor(num_fact) if topic_extractor else []),
-                        speaker="user",
+                        speaker="user", _source="fallback",
                     )
                     existing.add(num_fact.lower())
                     added += 1
@@ -282,7 +307,7 @@ class TemporalMemory:
                 self.remember_event(
                     num_fact, event_time=date,
                     topics=(topic_extractor(num_fact) if topic_extractor else []),
-                    speaker="user",
+                    speaker="user", _source="supplement",
                 )
                 existing.add(num_fact.lower())
                 added += 1
@@ -328,7 +353,7 @@ class TemporalMemory:
                 self.remember_event(
                     ent_fact, event_time=date,
                     topics=(topic_extractor(ent_fact) if topic_extractor else []),
-                    speaker="assistant",
+                    speaker="assistant", _source="supplement",
                 )
                 existing.add(ent_fact.lower())
                 added += 1
