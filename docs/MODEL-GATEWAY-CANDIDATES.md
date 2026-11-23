@@ -79,9 +79,22 @@
 若要试：注册时填 Promo Code，到账后立即在控制台确认余额与有效期；实测 tool_calls 后再决定是否接。
 中转网关的隐私/可靠性风险自担（见 C 级说明）。
 
+### 补充：四个指定平台的直达地址与核实状态（2026-11-23）
+
+| 平台 | 注册地址 | API 端点 | 免费额度 | 核实状态 | YoAi 适配 |
+|---|---|---|---|---|---|
+| **Mistral** | https://console.mistral.ai | `https://api.mistral.ai/v1` | Free层 $10/月（或Experiment层约1B token/月，说法不一） | ✅ OpenAI兼容 Chat Completions、**tool_calls 支持**、免信用卡（需手机号验证）；模型如 `mistral-small-4`、`deepseek-v4-1-flash-1017`（$0.30/$1.20） | **✅ 四者中唯一可接** |
+| **LongCat（美团）** | https://longcat.chat/ | 需注册后控制台确认 | 每日 5000 万 token | ⚠️ 官网无公开 API 端点文档，需注册看控制台 | 待核实 |
+| **SenseNova（商汤）** | https://www.sensenova.cn/ | 需注册后控制台确认 | 每模型 1500次/5小时、60RPM | ⚠️ 官网首页仅产品介绍，API 端点需注册后看 | 待核实 |
+| **Cohere** | https://dashboard.cohere.com/api-keys | `https://api.cohere.com/compatibility/v1` | Trial key 1000次/月、20RPM | ✅ OpenAI兼容端点、**tool_calls 支持**、免信用卡 | ❌ **条款禁用中国大陆/港澳**（同 packet.ai） |
+
+> Mistral 注意：手机号验证必须有；免费层数据在部分地区可能用于改进模型。
+> Cohere 注意：OpenAI 兼容端点是 `/compatibility/v1`，原生 API 是 `/v2`（响应结构不同，别混用）。
+
 ## 三、明确的排除项（别浪费时间）
 
 - **GitHub Models**：2026-07-30 已完全关停
+- **Cohere / packet.ai**：服务条款明确禁用中国大陆（含香港/澳门），禁止 VPN 规避——合规原因不用
 - **Cerebras**：免费改为 $5 试用、需绑卡
 - **OpenAI / Anthropic 官方**：无永久免费 API
 - **Groq / OpenRouter / NVIDIA NIM**：免费层限流严格（50-1000 次/天），不够评测；且海外端点国内直连不稳

@@ -103,10 +103,11 @@ def main() -> None:
         print(f"  ❌ 连接失败: {exc}")
         return
 
-    # ② 模型 ID 核对
+    # ② 模型 ID 核对（注意：base 已含 /v1，models 路径要用 /models 而非 /v1/models）
     print("\n[2/3] 用 /models 核对模型 ID…", flush=True)
+    models_path = "/models" if base.endswith("/v1") else "/v1/models"
     try:
-        m = post(base, key, "/models", {}, timeout=15.0)
+        m = post(base, key, models_path, {}, timeout=15.0)
         ids = [x.get("id", "") for x in m.get("data", [])]
         print(f"  网关可用模型 {len(ids)} 个")
         if model in ids:
@@ -114,6 +115,9 @@ def main() -> None:
         else:
             print(f"  ⚠️ 配置的 {model} 不在列表中")
             print(f"  前 10 个: {ids[:10]}")
+    except ModelHTTPError as exc:
+        print(f"  ⚠️ /models 返回 HTTP {exc.status}: {exc.message[:80]}")
+        print("  → 部分网关不提供此端点；模型 ID 请从控制台复制（第1步的对话测试才是权威）")
     except Exception as exc:  # noqa: BLE001
         print(f"  ⚠️ /models 不可用（{type(exc).__name__}），不影响上一步结论")
 
