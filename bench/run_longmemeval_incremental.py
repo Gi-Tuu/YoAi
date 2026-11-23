@@ -186,6 +186,7 @@ async def _answer_one(case: dict, out_dir: Path, temperature: float, max_chars: 
 
 
 def main() -> int:
+    SuanliAdapter.reset_usage_stats()   # 进程级统计清零（旁路，不影响答题）
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=str(ROOT / "bench_data" / "longmemeval_oracle.json"))
     ap.add_argument("--type", default="")
@@ -320,6 +321,14 @@ def main() -> int:
     (out / "traces.jsonl").write_text(
         "\n".join(json.dumps(t, ensure_ascii=False) for t in traces), encoding="utf-8"
     )
+    # 旁路 usage 统计（降本分析用，不影响任何答题/评分逻辑）
+    stats = dict(SuanliAdapter.usage_stats)
+    pt = stats.get("prompt_tokens", 0)
+    stats["cached_ratio"] = round(stats.get("cached_tokens", 0) / pt, 4) if pt else 0
+    (out / "usage_stats.json").write_text(
+        json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"USAGE {json.dumps(stats, ensure_ascii=False)}", flush=True)
     print(f"WROTE {out/'hypotheses.jsonl'} ({len(hyps)})", flush=True)
     return 0
 

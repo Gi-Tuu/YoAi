@@ -70,6 +70,26 @@ class SuanliAdapter(PeerAdapter):
 
     level = "L2"
 
+    # 类级累计：所有实例共享（评测每题新建 adapter，进程级汇总用）。
+    # 不影响任何答题行为，只做旁路统计。调用 reset_usage_stats() 可清零。
+    usage_stats: dict[str, int] = {
+        "calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+        "total_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0,
+    }
+
+    @classmethod
+    def reset_usage_stats(cls) -> None:
+        cls.usage_stats = {k: 0 for k in cls.usage_stats}
+
+    @classmethod
+    def add_usage(cls, usage: dict[str, Any]) -> None:
+        if not isinstance(usage, dict):
+            return
+        cls.usage_stats["calls"] += 1
+        for k in ("prompt_tokens", "completion_tokens", "total_tokens",
+                  "cached_tokens", "reasoning_tokens"):
+            cls.usage_stats[k] += int(usage.get(k, 0) or 0)
+
     def __init__(
         self,
         name: str = "算里 DeepSeek",
@@ -180,6 +200,7 @@ class SuanliAdapter(PeerAdapter):
 
         text, usage = _extract_text(data)
         tool_calls = _extract_tool_calls(data)
+        self.add_usage(usage)   # 旁路统计，不影响答题
         self.last_status = "ok"
         if not text and not tool_calls:
             return AdapterResult(False, level=self.level, detail="网关返回空文本", meta={"usage": usage})
@@ -208,6 +229,16 @@ def _extract_text(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         "completion_tokens": usage_raw.get("completion_tokens", 0),
         "total_tokens": usage_raw.get("total_tokens", 0),
     } if isinstance(usage_raw, dict) else {}
+    # 缓存命中 token——降本分析的关键指标（命中价可差 50 倍）。
+    # 兼容 OpenAI 标准 prompt_tokens_details，也兼容部分网关的 prompt_tokens_details.cached_tokens。
+    if isinstance(usage_raw, dict):
+        details = usage_raw.get("prompt_tokens_details") or {}
+        if isinstance(details, dict):
+            usage["cached_tokens"] = details.get("cached_tokens", 0)
+        usage["reasoning_tokens"] = (
+            (usage_raw.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)
+            if isinstance(usage_raw.get("completion_tokens_details"), dict) else 0
+        )
     return text.strip(), usage
 
 
