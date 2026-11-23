@@ -12,7 +12,7 @@
 | 批量口径（历史） | 71.8%（500题，低温）/ 63.0% 对照；非产品真实水平 | SELF-MEMORY-STABILITY.md |
 | 最新评测产物 | `bench_results/lme-inc-100-fix/`（94%）、`lme-inc-500-fix/` 前100题（82%） | — |
 | 500题全量 | 未跑完（停在约100题） | — |
-| 评测提速 | 已立项未实施（M0–M4 里程碑） | BENCH-SPEED-OPTIMIZATION-PLAN.md |
+| 评测提速 | **已完成**：题内并发8路(3.8-6.7×)+judge并发8路(6×)，500题17h→2.5-4.5h，等价性验证通过 | BENCH-SPEED-OPTIMIZATION-PLAN.md |
 
 ## B. 技术状态
 

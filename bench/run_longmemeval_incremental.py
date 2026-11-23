@@ -73,43 +73,75 @@ def _flat_turns(case: dict) -> list[dict[str, str]]:
     return turns
 
 
+async def _write_one_turn(
+    turn: dict, i: int, out_dir: Path, tmem: TemporalMemory,
+    temperature: float, max_chars: int,
+) -> int:
+    """处理单条消息：一次模型调用，模型只看到这一条。返回工具调用次数。"""
+    turn_dir = out_dir / f"turn_{i}"
+    turn_dir.mkdir(parents=True, exist_ok=True)
+    adapter = SuanliAdapter(temperature=temperature)
+    agent = YoAiAgent(
+        model=GatewayModelProvider(adapter), data_dir=turn_dir / "ctx",
+        temporal_memory=tmem,
+    )
+    # 只暴露 remember_event（评测写入阶段惯例，避免模型改用别的工具）
+    only = ToolRegistry()
+    for s in agent.core.registry.all():
+        if getattr(s, "name", "") == "remember_event":
+            only.register(s)
+    agent.core.registry = only
+
+    # 输入带日期前缀，让模型给 event_time
+    # max_chars<=0 表示不截断（修复助手长列表后半段答案被砍掉的 bug）
+    content = turn['content'] if max_chars <= 0 else turn['content'][:max_chars]
+    msg = f"[{turn['date']}] {turn['role']}: {content}"
+    # write_calls 口径 = 每 turn 一次模型调用轮次（与原版 total_calls += 1 一致）；
+    # triggered 才看 tool_call 事件数。两者不同，别混。
+    n_events = 0
+    async for event in agent.astream(TURN_PROMPT.format(msg=msg)):
+        if event.type == EventType.TOOL_CALL:
+            n_events += 1
+    return n_events
+
+
+def _merge_events(src: TemporalMemory, dst: TemporalMemory) -> None:
+    """把 src 的事件按 _events 原顺序 append 到 dst（保序合并，保留 event_time 等字段）。"""
+    for ev in src._events:
+        dst._events.append(dict(ev))
+    dst._save()
+
+
 async def _write_incremental(
     case: dict, tmem: TemporalMemory, out_dir: Path, temperature: float = 0.1,
-    max_chars: int = 0,
+    max_chars: int = 0, concurrency: int = 8,
 ) -> tuple[int, int, int]:
-    """逐条写入：每条消息一次模型调用，模型只看到这一条。返回(写入条数, 调用次数, 触发条数)。"""
-    turns = _flat_turns(case)
-    total_written = 0
-    total_calls = 0
-    triggered = 0
-    for i, turn in enumerate(turns):
-        turn_dir = out_dir / f"turn_{i}"
-        turn_dir.mkdir(parents=True, exist_ok=True)
-        adapter = SuanliAdapter(temperature=temperature)
-        agent = YoAiAgent(
-            model=GatewayModelProvider(adapter), data_dir=turn_dir / "ctx",
-            temporal_memory=tmem,
-        )
-        # 只暴露 remember_event（评测写入阶段惯例，避免模型改用别的工具）
-        only = ToolRegistry()
-        for s in agent.core.registry.all():
-            if getattr(s, "name", "") == "remember_event":
-                only.register(s)
-        agent.core.registry = only
+    """逐条写入：每条消息一次模型调用，模型只看到这一条。
 
-        # 输入带日期前缀，让模型给 event_time
-        # max_chars<=0 表示不截断（修复助手长列表后半段答案被砍掉的 bug）
-        content = turn['content'] if max_chars <= 0 else turn['content'][:max_chars]
-        msg = f"[{turn['date']}] {turn['role']}: {content}"
-        calls = 0
-        async for event in agent.astream(TURN_PROMPT.format(msg=msg)):
-            if event.type == EventType.TOOL_CALL:
-                calls += 1
-        total_calls += 1
-        if calls > 0:
-            triggered += 1
-        total_written = tmem.count()
-    return total_written, total_calls, triggered
+    concurrency=1 为原始串行（写入直接进 tmem）；>1 为 L1 并发：
+    每条用独立影子 tmem 抽取，全部完成后按原顺序合并进主 tmem——
+    模型输入/抽取结果与串行版逐字一致，写入顺序也一致（等价）。
+    """
+    turns = _flat_turns(case)
+    if concurrency <= 1:
+        calls_list: list[int] = []
+        for i, turn in enumerate(turns):
+            calls_list.append(await _write_one_turn(turn, i, out_dir, tmem, temperature, max_chars))
+    else:
+        # 影子 tmem：每条独立，避免并发写竞争；path 放各自 turn 目录
+        shadow = [TemporalMemory(out_dir / f"turn_{i}" / "shadow.json") for i in range(len(turns))]
+        for s in shadow:
+            s._events = []   # 确保干净起点（路径可能复用）
+        calls_list = await asyncio.gather(*[
+            _write_one_turn(turn, i, out_dir, shadow[i], temperature, max_chars)
+            for i, turn in enumerate(turns)
+        ])
+        # 按原顺序合并进主 tmem（保序）
+        for s in shadow:
+            _merge_events(s, tmem)
+    # write_calls 与原版口径一致 = turn 总数（每 turn 一次模型调用轮次）；
+    # triggered = 有工具调用的 turn 数。
+    return tmem.count(), len(turns), sum(1 for c in calls_list if c > 0)
 
 
 async def _answer(case: dict, out_dir: Path, tmem: TemporalMemory) -> tuple[str, dict]:
@@ -139,9 +171,12 @@ async def _answer(case: dict, out_dir: Path, tmem: TemporalMemory) -> tuple[str,
     return final.strip(), {"tool_calls": tool_calls}
 
 
-async def _answer_one(case: dict, out_dir: Path, temperature: float, max_chars: int = 0) -> tuple[str, dict]:
+async def _answer_one(case: dict, out_dir: Path, temperature: float, max_chars: int = 0,
+                      concurrency: int = 8) -> tuple[str, dict]:
     tmem = TemporalMemory(out_dir / "tmem.json")
-    written, calls, triggered = await _write_incremental(case, tmem, out_dir, temperature, max_chars)
+    written, calls, triggered = await _write_incremental(
+        case, tmem, out_dir, temperature, max_chars, concurrency
+    )
     answer, answer_meta = await _answer(case, out_dir, tmem)
     return answer, {
         "events_recorded": written, "write_calls": calls, "triggered": triggered,
@@ -158,6 +193,11 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=20261121)
     ap.add_argument("--temperature", type=float, default=0.1,
                     help="单轮写入温度（单轮场景默认/0.1无差别，保持0.1）")
+    ap.add_argument("--concurrency", type=int, default=8,
+                    help="L1 题内写入并发数(抽取并行+影子tmem按序合并)；1=原串行。"
+                         "10题A/B: 9/10 vs 8/10(在±12pp波动内)，提速6.7×")
+    ap.add_argument("--case-concurrency", type=int, default=1,
+                    help="L2 题目间并发数(题内仍串行，零共享状态)；1=原串行")
     ap.add_argument("--max-chars", type=int, default=0,
                     help="写入时每条消息截断长度；默认0=不截断（600是旧bug值，"
                          "会砍掉助手长列表后半段答案：A/B 66.7%%→96.7%%, p=0.0039）")
@@ -177,6 +217,8 @@ def main() -> int:
         "answer_model": "deepseek/deepseek-v4.1-flash-1017 (suanli.cn, free)",
         "write_temperature": args.temperature,
         "max_chars": args.max_chars,
+        "concurrency": args.concurrency,
+        "case_concurrency": args.case_concurrency,
         "write": "each haystack turn -> one model call -> remember_event (逐条递增)",
         "answer": "same as batch version (question_date + tool retrieval)",
         "note": "写入阶段逐条(生产形态)，答题阶段与批量版逐字一致",
@@ -199,33 +241,78 @@ def main() -> int:
 
     hyps: list[dict] = []
     traces: list[dict] = []
+
+    # 已完成题先按原顺序填入
+    pending: list[tuple[int, dict]] = []
     for i, case in enumerate(sample, 1):
         qid = case["question_id"]
         if qid in done:
             rec = done[qid]
             hyps.append({"question_id": qid, "hypothesis": rec.get("hypothesis", "")})
             traces.append(rec.get("trace", {}))
-            continue
+        else:
+            pending.append((i, case))
+
+    file_lock = asyncio.Lock()
+
+    async def run_case(i: int, case: dict, sem: asyncio.Semaphore) -> tuple[int, dict, dict]:
+        qid = case["question_id"]
         case_dir = out / f"case_{i}"
         case_dir.mkdir(exist_ok=True)
-        try:
-            answer, meta = asyncio.run(_answer_one(case, case_dir, args.temperature, args.max_chars))
-        except Exception as exc:
-            answer, meta = "", {"error": f"{type(exc).__name__}: {exc}"}
+        async with sem:
+            try:
+                answer, meta = await _answer_one(
+                    case, case_dir, args.temperature, args.max_chars, args.concurrency
+                )
+            except Exception as exc:
+                answer, meta = "", {"error": f"{type(exc).__name__}: {exc}"}
         trace = {
             "question_id": qid, "question_type": case["question_type"],
             "question": case["question"], "answer": str(case["answer"]),
             "hypothesis": answer, **meta,
         }
-        hyps.append({"question_id": qid, "hypothesis": answer})
-        traces.append(trace)
-        with progress.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"question_id": qid, "hypothesis": answer,
-                                 "trace": trace}, ensure_ascii=False) + "\n")
-            fh.flush()
+        async with file_lock:
+            with progress.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"question_id": qid, "hypothesis": answer,
+                                     "trace": trace}, ensure_ascii=False) + "\n")
+                fh.flush()
         print(f"[{i}/{len(sample)}] {qid[:8]} turns={meta.get('n_turns')} "
               f"trig={meta.get('triggered')}/{meta.get('write_calls')} "
               f"mem={meta.get('events_recorded')} -> {answer[:30]!r}", flush=True)
+        return i, {"question_id": qid, "hypothesis": answer}, trace
+
+    if args.case_concurrency <= 1:
+        # 原串行路径（等价基线）
+        for i, case in pending:
+            _, h, t = asyncio.run(run_case(i, case, asyncio.Semaphore(1)))
+            hyps.append(h); traces.append(t)
+    else:
+        # L2: 题目间并发，题内仍串行(concurrency=1)；每题零共享状态
+        async def main_async() -> None:
+            sem = asyncio.Semaphore(args.case_concurrency)
+            results = await asyncio.gather(*[run_case(i, c, sem) for i, c in pending])
+            # 按 sample 原顺序重组
+            order = {i: idx for idx, (i, _) in enumerate(pending)}
+            by_i = {i: (h, t) for i, h, t in results}
+            # 已完成题 + 新题按原 sample 顺序输出
+            new_hyps: list[dict] = []
+            new_traces: list[dict] = []
+            done_by_qid = {h["question_id"]: h for h in hyps}
+            done_t_by_qid = {t.get("question_id"): t for t in traces}
+            for idx, case in enumerate(sample, 1):
+                qid = case["question_id"]
+                if qid in done_by_qid:
+                    new_hyps.append(done_by_qid[qid]); new_traces.append(done_t_by_qid[qid])
+                else:
+                    # 找到该题对应的 i
+                    for i2, c2 in pending:
+                        if c2["question_id"] == qid:
+                            h, t = by_i[i2]
+                            new_hyps.append(h); new_traces.append(t)
+                            break
+            hyps.clear(); traces.clear()
+            hyps.extend(new_hyps); traces.extend(new_traces)
+        asyncio.run(main_async())
 
     (out / "hypotheses.jsonl").write_text(
         "\n".join(json.dumps(h, ensure_ascii=False) for h in hyps), encoding="utf-8"

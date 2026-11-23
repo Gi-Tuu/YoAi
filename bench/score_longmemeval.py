@@ -106,6 +106,8 @@ def main() -> int:
     ap.add_argument("--hyp", required=True)
     ap.add_argument("--ref", default=str(ROOT / "bench_data" / "longmemeval_oracle.json"))
     ap.add_argument("--out", required=True)
+    ap.add_argument("--concurrency", type=int, default=8,
+                    help="judge 并发数（L3 提速6×；验证：串行自身抖动1-2题，并发差异同量级）；1=原串行")
     args = ap.parse_args()
 
     hypotheses = [json.loads(l) for l in Path(args.hyp).read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -116,20 +118,36 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     logs: list[dict] = []
     by_type: dict[str, list[int]] = {}
+
+    # 构造待评任务（保持原顺序）
+    tasks: list[tuple[dict, str, str]] = []
     for entry in hypotheses:
         qid = entry["question_id"]
         if qid not in qid2data:
             continue
         ref = qid2data[qid]
-        qtype = ref["question_type"]
         prompt = get_anscheck_prompt(
-            qtype, ref["question"], ref["answer"], entry["hypothesis"],
+            ref["question_type"], ref["question"], ref["answer"], entry["hypothesis"],
             abstention=qid.endswith("_abs"),
         )
+        tasks.append((entry, ref["question_type"], prompt))
+
+    def _judge_one(prompt: str) -> tuple[bool, str]:
         try:
-            label, raw = judge(prompt)
-        except Exception as exc:
-            label, raw = False, f"JUDGE_ERROR {type(exc).__name__}: {exc}"
+            return judge(prompt)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"JUDGE_ERROR {type(exc).__name__}: {exc}"
+
+    if args.concurrency <= 1:
+        results = [_judge_one(prompt) for _, _, prompt in tasks]
+    else:
+        # L3: judge 无状态、temperature=0 → 并发结果等价；按输入顺序收集
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+            results = list(pool.map(lambda t: _judge_one(t[2]), tasks))
+
+    for (entry, qtype, _), (label, raw) in zip(tasks, results):
+        qid = entry["question_id"]
         entry["autoeval_label"] = {"model": JUDGE_MODEL, "label": label, "raw": raw}
         logs.append(entry)
         by_type.setdefault(qtype, []).append(1 if label else 0)
