@@ -94,6 +94,23 @@
 | C | 数字补充开关 | B | 小 |
 | D | 独立抽取层 | — | 暂不实施 |
 
-## 八、当前状态
+## 八、实施状态（2026-11-24）
 
-**仅计划，未实施**。等用户确认后从阶段 A 开始。
+**阶段 A/B/C 已实施**，191 passed：
+
+| 阶段 | 实现 | 提交 | 默认 |
+|---|---|---|---|
+| A 可观测 | `TemporalMemory.write_stats` 按来源计数（model/fallback/supplement），
+  `YoAiAgent.last_write_stats()`/`reset_write_stats()` 透传，astream 每轮清零 | `b43c4ba` | 总是开启（纯旁路） |
+| B 兜底 | `YoAiAgent(memory_fallback=True)`：模型0写入 + 用户话有事实信号 → `remember_from_transcript` | `418bd50` | **False（opt-in）** |
+| C 数字补充 | `YoAiAgent(number_supplement=True)`：无条件叠加数字事实，内部去重 | `7afd343` | **False（opt-in）** |
+
+**护栏落实**：兜底只在 0 条时触发；寒暄/提问被 `_has_memory_worthy_fact` 挡住；
+内容逐字取自原话（复用已验证的 `remember_from_transcript`）；`_source` 标记区分写入来源。
+
+**未决（需真实对话验证）**：
+- B/C 默认是否从 False 改 True——现在保守 opt-in，不改变既有行为
+- 验证方法：同批真实对话跑两周，对比"记0条率"和人工抽查准确率（计划 §五.3）
+- 在拿到真实数据前**不建议改默认**：漏记好过错记（错记会污染记忆库，检索全是噪音）
+
+**未实施**：阶段 D（独立抽取层，单轮验证零收益，维持不做）。
