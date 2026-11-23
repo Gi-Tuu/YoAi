@@ -12,6 +12,7 @@
 | 确定性铁证 | assistant 专项 A/B 66.7%→96.7%，修对9/弄坏0，p=0.0039 | ASSISTANT-ROOT-CAUSE-BREAKTHROUGH.md |
 | 批量口径（历史） | 71.8%（500题，低温）/ 63.0% 对照；非产品真实水平 | SELF-MEMORY-STABILITY.md |
 | 最新评测产物 | `bench_results/lme-inc-500-fix/`（全量500题最终成绩） | — |
+| 网关迁移 | 算里key到期(401)→百炼同款ds-v4.1-flash-1017；30题同题A/B 76.7% vs 76.7%一致 | MODEL-GATEWAY-CANDIDATES.md |
 | 500题全量 | **已完成**（2026-11-23，免费额度最后一天） | — |
 | 评测提速 | **已完成**：题内并发8路(3.8-6.7×)+judge并发8路(6×)，500题17h→2.5-4.5h，等价性验证通过 | BENCH-SPEED-OPTIMIZATION-PLAN.md |
 
