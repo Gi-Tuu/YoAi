@@ -46,6 +46,23 @@
 | NovAI | 5 个 Flash 模型 10次/天 | `https://aiapi-pro.com/v1` | 免费层 10次/天，不够评测 |
 | 幻城网安 | 注册送免费额度 | 公益网关 | GLM/DeepSeek/Qwen/Kimi/Step |
 
+### D 级 · packet.ai Token Factory（技术完美，但地区条款受限）
+
+| 项 | 核实结果（2026-11-23） |
+|---|---|
+| 免费期 | **至 2026-12-15 23:59 UTC（北京 12-16 08:00）**，官方原句 `No money until 15 Dec 2026`，无延期口子 |
+| 端点 | `https://api.packet.ai/v1`（OpenAI 兼容，只改 base_url/key/model） |
+| 免费模型 | DeepSeek V4.1 Flash (NVFP4)、MiniMax M3.1 Flash、Qwen2.5-1.5B-Instruct |
+| tool_calls | **明确支持**（function calling / agentic workflows）✅ |
+| 上下文 | DeepSeek/MiniMax 131K（官网写 1M，API 实测 131072，按 131K 估） |
+| 注册 | 邮箱/Google + 手机号短信验证一次，无需信用卡；key 以 `hai_tf-` 开头 |
+| 模型 ID | 必须连字符版 `nvidia-deepseek-v4-1-flash-nvfp4`（官网斜杠版会 404） |
+| 坑 | 默认开思考占 max_tokens（调大）；无公开速率上限（看控制台 Billing→Usage→Limits）；只文本对话无多模态 |
+| **⚠️ 地区条款** | **用户协议第 6 节把 China (incl. Hong Kong)、Macau 列受限清单，禁止使用，禁止 VPN 规避**——按条款大陆用户不在服务范围 |
+| 到期价 | DeepSeek 输入 $0.23 / 输出 $0.85 每百万 token |
+
+**判断**：技术和额度都极对口（免费一个月、支持工具调用、模型与当前一致），**但地区条款是硬约束**——不建议绕行。若你所在地符合条款则可用；否则按合规渠道选 A/B 级。
+
 ## 三、明确的排除项（别浪费时间）
 
 - **GitHub Models**：2026-07-30 已完全关停
