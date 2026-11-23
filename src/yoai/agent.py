@@ -50,12 +50,15 @@ class YoAiAgent:
         temporal_memory: bool | Any = True,
         tool_filter: Any = None,
         memory_fallback: bool = False,
+        number_supplement: bool = False,
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
         过滤可用工具（专家白名单接线）。None 或返回 None 表示不限制。默认不启用，
         生产行为完全不变。就地修改 registry 对象以保持 loop 持有的引用一致。
         memory_fallback: 阶段B——模型本轮一个记忆都没写时，是否用确定性规则兜底。
-        默认 False（保守，不改既有行为）；验证后再决定是否设默认。"""
+        默认 False（保守，不改既有行为）；验证后再决定是否设默认。
+        number_supplement: 阶段C——无条件叠加"数字+名词"事实抽取。默认 False：
+        全量A/B已证不显著（63.0%→63.2%, p=1.0），仅数字密集场景按需开启。"""
         data_dir = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
         self.context = PersonalContext(data_dir / "context.json")
         self.goals = GoalManager(data_dir / "goals.json")
@@ -68,6 +71,7 @@ class YoAiAgent:
         else:
             self.temporal_memory = temporal_memory   # 允许注入自定义实例
         self.memory_fallback = bool(memory_fallback)
+        self.number_supplement = bool(number_supplement)
         self.capabilities = PersonalCapabilities(
             self.context, self.goals, self.temporal_memory
         )
@@ -161,16 +165,25 @@ class YoAiAgent:
             if event.type == EventType.DONE:
                 final_text = str((event.data or {}).get("final_text", ""))
             yield event
-        # 阶段B：模型本轮一个都没记 + 用户话有事实 → 确定性兜底（保守 opt-in）
-        if (self.memory_fallback and self.temporal_memory is not None
+        # 阶段B/C：确定性补充（均 opt-in，默认关闭；失败不能反噬主任务）
+        if self.temporal_memory is None or not (self.memory_fallback or self.number_supplement):
+            return
+        turns = [{"role": "user", "content": task}]
+        if final_text:
+            turns.append({"role": "assistant", "content": final_text})
+        # 阶段B：模型本轮一个都没记 + 用户话有事实信号 → 规则兜底
+        if (self.memory_fallback
                 and self.last_write_stats()["events"] == 0
                 and self._has_memory_worthy_fact(task)):
-            turns = [{"role": "user", "content": task}]
-            if final_text:
-                turns.append({"role": "assistant", "content": final_text})
             try:
                 self.temporal_memory.remember_from_transcript(turns)
-            except Exception:  # noqa: BLE001 - 兜底失败不能反噬主任务
+            except Exception:  # noqa: BLE001
+                pass
+        # 阶段C：无条件叠加数字事实（内部按 existing 去重，不重复写）
+        if self.number_supplement:
+            try:
+                self.temporal_memory.supplement_number_facts(turns)
+            except Exception:  # noqa: BLE001
                 pass
 
     @staticmethod

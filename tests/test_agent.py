@@ -139,3 +139,28 @@ def test_memory_fallback_optin(tmp_path):
     assert stats["model"] >= 1, stats
     assert stats["fallback"] == 0, stats   # 模型写了，兜底不触发
     assert d.temporal_memory.count() == stats["events"]   # 没有重复写
+
+
+def test_number_supplement_optin(tmp_path):
+    """阶段C：number_supplement=True 叠加数字事实；默认关不叠加；supplement来源被计数。"""
+    task = "I have 3 sisters and I like hiking"
+
+    # 默认关：不补
+    a = YoAiAgent(model=ScriptedModel([ModelResponse(content="ok")]), data_dir=tmp_path / "ns_off")
+    async def run_off():
+        async for _ in a.astream(task):
+            pass
+    asyncio.run(run_off())
+    assert a.temporal_memory.count() == 0
+
+    # 开启：补到数字事实（模型本身0写入）
+    b = YoAiAgent(model=ScriptedModel([ModelResponse(content="ok")]),
+                  data_dir=tmp_path / "ns_on", number_supplement=True)
+    async def run_on():
+        async for _ in b.astream(task):
+            pass
+    asyncio.run(run_on())
+    stats = b.last_write_stats()
+    assert stats["supplement"] >= 1, stats
+    assert any("3 sisters" in e["what"] for e in b.temporal_memory.timeline()), \
+        b.temporal_memory.timeline()
