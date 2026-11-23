@@ -50,9 +50,30 @@ def test_starfield_runs(app, tmp_path):
     w.resize(300, 200)
     w.show()
     assert w.isVisible()
+    assert w._timer.isActive()
+    w.hide()
+    assert not w._timer.isActive()
     w.set_palette(Palette.light())
+    w.show()
     assert w.palette.name == THEME_PAPER
+    assert not w._timer.isActive()
     w.close()
+
+
+def test_main_window_pauses_starfield_on_hidden_tab(app, tmp_path):
+    from yoai.agent import YoAiAgent
+    from yai_core import ModelResponse, ScriptedModel
+
+    archive, _root, _child = _archive(tmp_path)
+    agent = YoAiAgent(model=ScriptedModel([ModelResponse(content="hi")]), data_dir=tmp_path / "agent")
+    win = MainWindow(agent, evolution_archive=archive)
+    win.show()
+    win._open_galaxy()
+    win._toggle_theme()
+    assert win.galaxy.starfield._timer.isActive()
+    win.tabs.setCurrentIndex(0)
+    assert not win.galaxy.starfield._timer.isActive()
+    win.close()
 
 
 # --- 星系图 ---
@@ -124,12 +145,12 @@ def test_main_window_theme_toggle(app, tmp_path):
     agent = YoAiAgent(model=ScriptedModel([ModelResponse(content="hi")]), data_dir=tmp_path)
     win = MainWindow(agent, evolution_archive=ar)
     win.show()
+    assert win.palette.name == THEME_PAPER
+    win._toggle_theme()
     assert win.palette.name == THEME_DEEP
+    assert win.galaxy.palette.name == THEME_DEEP
     win._toggle_theme()
     assert win.palette.name == THEME_PAPER
-    assert win.galaxy.palette.name == THEME_PAPER
-    win._toggle_theme()
-    assert win.palette.name == THEME_DEEP
     win.close()
 
 
@@ -149,10 +170,10 @@ def test_orbit_button_opens_galaxy(app, tmp_path):
 def test_paper_ink_palette_values():
     from yoai.desktop.cosmic.theme import Palette
     light, dark = Palette.light(), Palette.dark()
-    assert light.paper == "#f4f0e6" and light.ink == "#1b1815"
-    assert dark.paper == "#131110" and dark.ink == "#e9e1d4"
+    assert light.paper == "#F6F5F1" and light.ink == "#242522"
+    assert dark.paper == "#171918" and dark.ink == "#ECEEE8"
     assert len(light.ring) == 6 and len(dark.ring) == 6
-    assert "border-radius: 0" in qss(light)  # 零圆角硬约束
+    assert "border-radius: 6px" in qss(light)
 
 
 def test_lifecycle_colors_use_brick_palette():
@@ -160,7 +181,26 @@ def test_lifecycle_colors_use_brick_palette():
     pal = Palette.dark()
     assert pal.lifecycle_color("active") == pal.vermilion
     assert pal.lifecycle_color("probation") == pal.warn
-    assert pal.lifecycle_color("retired") == "#6f4a0f"
+    assert pal.lifecycle_color("retired") == "#6F4A0F"
+
+
+def test_theme_text_contrast():
+    from yoai.desktop.cosmic.theme import Palette
+
+    def luminance(value):
+        channels = [int(value[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+        channels = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+    def contrast(first, second):
+        high, low = sorted((luminance(first), luminance(second)), reverse=True)
+        return (high + 0.05) / (low + 0.05)
+
+    for palette in (Palette.light(), Palette.dark()):
+        assert contrast(palette.ink, palette.paper2) >= 4.5
+        assert contrast(palette.weak, palette.paper2) >= 4.5
+        assert contrast(palette.on_accent, palette.brick) >= 4.5
+        assert contrast(palette.ok, palette.paper2) >= 4.5
 
 
 def test_planet_texture_is_seamless():

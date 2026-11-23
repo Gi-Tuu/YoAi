@@ -19,11 +19,19 @@ PYINSTALLER = Path(sys.executable).parent / "PyInstaller.exe"
 
 
 def main() -> int:
-    # 清理旧产物，避免拿缓存冒充新构建
-    for name in ("build", "dist"):
-        target = ROOT / name
-        if target.exists():
-            shutil.rmtree(target)
+    # 清理构建缓存和旧 exe，但保留用户的本地状态与图标资产。
+    build_dir = ROOT / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    dist_dir = ROOT / "dist"
+    if dist_dir.exists():
+        for child in dist_dir.iterdir():
+            if child.name in ("output", "yoai-planet.ico"):
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
 
     cmd = [
         str(PYINSTALLER) if PYINSTALLER.exists() else sys.executable,

@@ -47,11 +47,12 @@ def test_event_rendering_updates_trace_and_chat(app, tmp_path):
     # 直接渲染事件，验证 UI 映射逻辑（不依赖线程时序）
     win._on_event("strategy_selected", {"strategy": "react"})
     win._on_event("tool_call", {"tool": "remember_fact", "arguments": {"key": "theme"}})
-    win._on_done("已记住你的偏好。")
+    win._on_done('已处理。结果：<tool_output untrusted="true">已记住你的偏好。</tool_output>')
     texts = [win.trace.item(i).text() for i in range(win.trace.count())]
     assert any("路由" in t and "react" in t for t in texts)
     assert any("调用工具" in t and "remember_fact" in t for t in texts)
-    assert "[YoAi] 已记住你的偏好。" in win.chat.toPlainText()
+    assert "[YoAi] 已处理。结果：已记住你的偏好。" in win.chat.toPlainText()
+    assert "<tool_output" not in win.chat.toPlainText()
     assert win.send_btn.isEnabled() is True
     win.close()
 
@@ -79,3 +80,65 @@ def test_worker_signal_drives_real_loop(app, tmp_path):
     assert "[YoAi]" in win.chat.toPlainText()
     assert win.trace.count() >= 2
     win.close()
+
+
+def test_paper_shell_and_collapsible_inspector(app, tmp_path):
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+    win.show()
+    assert win.palette.name == "light"
+    assert win.nav.buttons["chat"].isChecked()
+    assert win.inspector.isVisible()
+    win._set_inspector_visible(False)
+    assert not win.inspector.isVisible()
+    assert win.inspector_toggle_btn.isVisible()
+    win._set_inspector_visible(True)
+    win.resize(980, 640)
+    app.processEvents()
+    assert not win.inspector.isVisible()
+    assert win.inspector_toggle_btn.isVisible()
+    win.close()
+
+
+def test_communication_uses_context_inspector(app, tmp_path):
+    from yoai.demo_world import build_demo_channel
+
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path / "main")
+    channel = build_demo_channel(tmp_path / "chat")
+    win = MainWindow(agent, channel=channel)
+    win.tabs.setCurrentIndex(1)
+    assert win.inspector_title.text() == "会话检查器"
+    assert win.nav.buttons["communication"].isChecked()
+    assert win.inspector_stack.currentIndex() == 1
+    win.close()
+
+
+def test_memory_summary_reads_real_write_stats(app, tmp_path):
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+    agent.temporal_memory.write_stats.update({"calls": 1, "events": 1, "fallback": 1})
+    win._refresh_memory_summary()
+    assert "本轮记忆 +1" in win.memory_summary.value.text()
+    assert "规则兜底" in win.memory_summary.source.text()
+    win.close()
+
+
+def test_composer_enter_and_shift_enter(app):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+    from yoai.desktop.widgets import Composer
+
+    composer = Composer()
+    sent = []
+    composer.returnPressed.connect(lambda: sent.append(composer.text()))
+    composer.setText("第一行")
+    cursor = composer.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    composer.setTextCursor(cursor)
+    QTest.keyClick(composer, Qt.Key.Key_Return)
+    assert sent == ["第一行"]
+    QTest.keyClick(composer, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    assert sent == ["第一行"]
+    assert composer.text() == "第一行\n"
+    composer.close()

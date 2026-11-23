@@ -1,20 +1,4 @@
-"""宇宙星球系主题 · 对齐 AMBRACE 服务器控制台 d2.css 原值。
-
-硬约束（原文）：零圆角 / 无阴影 / 无渐变(装饰性) / 装饰性强调色每页≤6处 / 星空只进墨纸档。
-
-双主题：
-- light 纸墨：#f4f0e6 底 / #1b1815 墨
-- dark  墨纸：#131110 底 / #e9e1d4 墨
-强调色：砖红 #8c3f2b、朱红 #d8452a、绿 #4f6b4a、琥珀 #a8642c。
-环图六档：同一支砖红谱由深到浅 + 一档灰（--ring1..6）。
-
-字体角色：界面雅黑 / 标题宋体 / 数字 Georgia / 代码 Consolas。
-字号阶梯：cap10.5 note11.5 body12.5 lead13 h3=15 h2=16 h1=19 code22 num26 date40。
-缓动：cubic-bezier(.2,.7,.3,1)。
-
-生命周期色标（星球光晕）：active 朱红发光 / probation 琥珀微光 /
-candidate 灰暗 / retired 深赭熄灭。
-"""
+"""纸墨工作台主题与 Qt 样式。"""
 
 from __future__ import annotations
 
@@ -22,23 +6,26 @@ from dataclasses import dataclass
 
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
-THEME_PAPER = THEME_LIGHT   # 兼容旧名
-THEME_DEEP = THEME_DARK     # 兼容旧名
+THEME_PAPER = THEME_LIGHT
+THEME_DEEP = THEME_DARK
 
 
 @dataclass(frozen=True)
 class Palette:
     name: str
-    paper: str          # 页底
-    paper2: str         # 次底（卡片/侧栏）
-    ink: str            # 主文字
-    dim: str            # 次文字
-    weak: str           # 弱文字
-    brick: str          # 砖红（强调）
-    vermilion: str      # 朱红
+    paper: str
+    paper2: str
+    nav: str
+    ink: str
+    dim: str
+    weak: str
+    brick: str
+    vermilion: str
     ok: str
     warn: str
-    rule: str           # 描边
+    rule: str
+    accent_soft: str
+    on_accent: str
     ring: tuple[str, ...]
     star: str
     meteor_head: str
@@ -48,29 +35,52 @@ class Palette:
     def light(cls) -> Palette:
         return cls(
             name=THEME_LIGHT,
-            paper="#f4f0e6", paper2="#efe9db",
-            ink="#1b1815", dim="#6f665a", weak="#756a5c",
-            brick="#8c3f2b", vermilion="#d8452a",
-            ok="#4f6b4a", warn="#a8642c", rule="#d8cfbd",
-            ring=("#8c3f2b", "#a8563c", "#c1714f", "#d69b76", "#e3bb9c", "#c3bdb1"),
-            star="#c2871d",          # 纸色档星点=金（落叶感）
-            meteor_head="#c2871d", meteor_tail="#e3ae3c",
+            paper="#F6F5F1",
+            paper2="#FFFFFF",
+            nav="#EEEFEA",
+            ink="#242522",
+            dim="#51574F",
+            weak="#62685F",
+            brick="#B64732",
+            vermilion="#C65A3E",
+            ok="#3F6B58",
+            warn="#9A641C",
+            rule="#D9DBD4",
+            accent_soft="#F4E7E2",
+            on_accent="#FFFFFF",
+            ring=("#B64732", "#C4674F", "#D38770", "#DFA58F", "#EBC4B5", "#C9CDC3"),
+            star="#B64732",
+            meteor_head="#B64732",
+            meteor_tail="#D9DBD4",
         )
 
     @classmethod
     def dark(cls) -> Palette:
         return cls(
             name=THEME_DARK,
-            paper="#131110", paper2="#1a1714",
-            ink="#e9e1d4", dim="#a99d8d", weak="#8d8172",
-            brick="#c9785f", vermilion="#f0552f",
-            ok="#8dbf95", warn="#d3924f", rule="#302b24",
-            ring=("#c9785f", "#d98f6d", "#e5a882", "#eec39f", "#f4d8bd", "#4f463d"),
-            star="#e9e1d4",
-            meteor_head="#fff6e0", meteor_tail="#ffbe96",
+            paper="#171918",
+            paper2="#202321",
+            nav="#1C1F1D",
+            ink="#ECEEE8",
+            dim="#B4BAB0",
+            weak="#9DA599",
+            brick="#E08A72",
+            vermilion="#F0552F",
+            ok="#8FC7A7",
+            warn="#D6A45F",
+            rule="#343A34",
+            accent_soft="#392923",
+            on_accent="#171918",
+            ring=("#E08A72", "#E49D86", "#E8B09C", "#EDC4B3", "#F2D8CD", "#596158"),
+            star="#ECEEE8",
+            meteor_head="#FFF6E8",
+            meteor_tail="#E08A72",
         )
 
-    # 兼容旧调用名（main_window / galaxy 里用到）
+    @classmethod
+    def deep(cls) -> Palette:
+        return cls.dark()
+
     @property
     def bg_outer(self) -> str:
         return self.paper
@@ -99,10 +109,6 @@ class Palette:
     def accent(self) -> str:
         return self.brick
 
-    @classmethod
-    def deep(cls) -> Palette:
-        return cls.dark()
-
     @property
     def active(self) -> str:
         return self.vermilion
@@ -117,104 +123,141 @@ class Palette:
 
     @property
     def retired(self) -> str:
-        return "#6f4a0f"
+        return "#6F4A0F"
 
     def lifecycle_color(self, lifecycle: str) -> str:
         return {
-            "active": self.vermilion,     # 朱红发光
-            "probation": self.warn,       # 琥珀微光
-            "candidate": self.weak,       # 灰暗
-            "retired": "#6f4a0f",         # 深赭熄灭
+            "active": self.vermilion,
+            "probation": self.warn,
+            "candidate": self.weak,
+            "retired": self.retired,
         }.get(lifecycle, self.weak)
 
 
 def qss(p: Palette) -> str:
-    """严格按 d2.css 硬约束：零圆角、无阴影、1px 实线、纯色面。
-
-    装饰性强调色（砖红）只用在 ≤6 处：选中标签下划线、主按钮、输入聚焦描边、
-    YoAi 名字、悬停态、列表选中文字。其余一律墨色 / 描边色。
-    字体角色：界面雅黑 / 标题宋体 / 数字 Georgia。
-    """
     song = '"SimSun", "Songti SC", "STSong", serif'
+    ui = '"Microsoft YaHei", "DengXian", "Segoe UI", sans-serif'
     return f"""
     QMainWindow, QWidget#cosmicRoot {{ background: {p.paper}; color: {p.ink}; }}
-    QWidget {{ background: transparent; color: {p.ink}; }}
-
-    /* 标题栏 */
-    QLabel#appTitle {{ font-family: {song}; font-size: 19pt; color: {p.ink}; }}
-    QLabel#appSub {{ color: {p.weak}; font-size: 10pt; padding-bottom: 3px; }}
+    QWidget {{ background: transparent; color: {p.ink}; font-family: {ui}; }}
+    QLabel {{ color: {p.ink}; }}
     QFrame#rule {{ background: {p.rule}; border: none; }}
 
-    /* 标签页 */
+    QFrame#navRail {{ background: {p.nav}; border-right: 1px solid {p.rule}; }}
+    QLabel#brandMark {{ font-family: {song}; font-size: 22pt; font-weight: 700; color: {p.ink}; }}
+    QLabel#brandSub {{ color: {p.weak}; font-size: 8.5pt; }}
+    QPushButton#navButton {{
+        background: transparent; color: {p.dim}; border: none;
+        border-left: 3px solid transparent; border-radius: 0;
+        padding: 12px 14px; min-height: 42px; text-align: left;
+        font-size: 11pt; font-weight: 500;
+    }}
+    QPushButton#navButton:hover {{ background: {p.paper2}; color: {p.ink}; }}
+    QPushButton#navButton:checked {{ background: {p.accent_soft}; color: {p.ink}; border-left-color: {p.brick}; }}
+    QPushButton#navButton:disabled {{ color: {p.weak}; }}
+    QPushButton#themeButton {{
+        background: transparent; color: {p.dim}; border: 1px solid {p.rule};
+        border-radius: 6px; padding: 7px 10px; min-height: 32px;
+    }}
+    QPushButton#themeButton:hover {{ background: {p.paper2}; color: {p.ink}; }}
+
+    QFrame#topBar {{ background: {p.paper2}; border-bottom: 1px solid {p.rule}; }}
+    QLabel#pageTitle {{ font-size: 15pt; font-weight: 600; color: {p.ink}; }}
+    QLabel#fieldLabel {{ color: {p.weak}; font-size: 9.5pt; }}
+    QLabel#modelChip {{
+        background: {p.nav}; color: {p.dim}; border: 1px solid {p.rule};
+        border-radius: 6px; padding: 5px 10px; font-size: 9.5pt;
+    }}
+    QLabel#taskState {{ color: {p.weak}; font-size: 9.5pt; padding: 4px 8px; }}
+    QLabel#taskState[state="running"] {{ color: {p.brick}; background: {p.accent_soft}; border-radius: 6px; }}
+    QLabel#taskState[state="error"] {{ color: {p.vermilion}; background: {p.accent_soft}; border-radius: 6px; }}
+    QLabel#taskState[state="done"] {{ color: {p.ok}; }}
+
     QTabWidget::pane {{ border: none; background: transparent; }}
-    QTabBar::tab {{
-        background: transparent; color: {p.dim};
-        border: 0; border-bottom: 1px solid {p.rule};
-        padding: 8px 18px; margin-right: 0; font-size: 10.5pt;
-    }}
-    QTabBar::tab:hover {{ color: {p.ink}; }}
-    QTabBar::tab:selected {{ color: {p.ink}; border-bottom: 2px solid {p.brick}; }}
+    QTabBar::tab {{ background: transparent; color: {p.dim}; border: none; padding: 8px 14px; }}
 
-    QLabel {{ color: {p.ink}; }}
-    QLabel#fieldLabel {{ color: {p.dim}; }}
-
-    /* 对话区与输入区 */
-    QFrame#chatFrame {{ background: {p.paper}; border: 1px solid {p.rule}; }}
-    QTextBrowser#chatView {{ background: {p.paper}; border: none; font-size: 10.5pt; }}
+    QFrame#chatSurface {{ background: {p.paper2}; border: 1px solid {p.rule}; border-radius: 10px; }}
+    QTextBrowser#chatView {{ background: {p.paper2}; border: none; font-size: 11pt; }}
+    QFrame#composerSurface {{ background: {p.paper2}; border: 1px solid {p.rule}; border-radius: 10px; }}
     QPlainTextEdit#composer {{
-        background: {p.paper2}; color: {p.ink};
-        border: 1px solid {p.rule}; border-radius: 0; padding: 8px 10px; font-size: 10.5pt;
+        background: transparent; color: {p.ink}; border: none;
+        padding: 10px 12px; font-size: 11pt;
     }}
-    QPlainTextEdit#composer:focus {{ border: 1px solid {p.brick}; }}
+    QLabel#composerHint {{ color: {p.weak}; font-size: 8.5pt; padding: 0 12px 8px 12px; }}
 
-    QLineEdit, QPlainTextEdit, QListWidget {{
-        background: {p.paper2}; color: {p.ink};
-        border: 1px solid {p.rule}; border-radius: 0; padding: 6px;
-    }}
-    QLineEdit:focus {{ border: 1px solid {p.ink}; }}
-
-    /* 侧栏卡片 */
-    QFrame#card {{ background: {p.paper2}; border: 1px solid {p.rule}; }}
-    QFrame#card QListWidget {{ background: transparent; border: none; padding: 0; }}
-    QLabel#sectionTitle {{ font-family: {song}; font-size: 12pt; color: {p.ink}; }}
+    QFrame#inspector {{ background: {p.paper2}; border-left: 1px solid {p.rule}; }}
+    QLabel#inspectorTitle {{ font-size: 12pt; font-weight: 600; }}
+    QFrame#inspectorSection {{ background: transparent; border: none; }}
+    QLabel#sectionTitle {{ font-size: 10.5pt; font-weight: 600; color: {p.ink}; }}
     QLabel#countBadge {{
-        font-family: Georgia, serif; font-size: 10pt; color: {p.dim};
-        border: 1px solid {p.rule}; padding: 0 7px;
+        font-family: Georgia, serif; font-size: 9.5pt; color: {p.dim};
+        background: {p.nav}; border: none; border-radius: 4px; padding: 2px 7px;
     }}
-    QLabel#hint {{ color: {p.weak}; font-size: 9.5pt; padding: 4px 0; }}
-    QListWidget::item {{ padding: 5px 2px; border-bottom: 1px solid {p.rule}; }}
-    QListWidget::item:hover {{ background: {p.paper}; }}
-    QListWidget::item:selected {{ background: transparent; color: {p.brick}; }}
+    QLabel#hint {{ color: {p.weak}; font-size: 9pt; padding: 3px 0; }}
+    QFrame#memorySummary {{ background: {p.accent_soft}; border: none; border-radius: 8px; }}
+    QLabel#memoryValue {{ color: {p.brick}; font-size: 13pt; font-weight: 600; }}
+    QLabel#memorySource {{ color: {p.dim}; font-size: 8.5pt; }}
+    QLabel#contextLabel {{ color: {p.weak}; font-size: 9pt; font-weight: 600; }}
+    QLabel#contextValue {{ color: {p.ink}; font-size: 10.5pt; }}
 
-    /* 按钮：默认描边 / ghost 无框 / primary 实底砖红 */
     QPushButton {{
-        background: transparent; color: {p.ink};
-        border: 1px solid {p.rule}; border-radius: 0; padding: 6px 14px;
+        background: {p.paper2}; color: {p.ink}; border: 1px solid {p.rule};
+        border-radius: 6px; padding: 7px 14px; min-height: 32px; font-size: 10pt;
     }}
-    QPushButton:hover {{ color: {p.brick}; border-color: {p.brick}; }}
-    QPushButton:disabled {{ color: {p.weak}; border-color: {p.rule}; }}
-    QPushButton#ghost {{ border: 1px solid transparent; color: {p.dim}; padding: 5px 10px; }}
-    QPushButton#ghost:hover {{ color: {p.ink}; border-color: {p.rule}; }}
+    QPushButton:hover {{ background: {p.nav}; border-color: {p.dim}; }}
+    QPushButton:pressed {{ background: {p.accent_soft}; }}
+    QPushButton:focus {{ border: 2px solid {p.brick}; }}
+    QPushButton:disabled {{ background: {p.nav}; color: {p.weak}; border-color: {p.rule}; }}
+    QPushButton#ghost {{ background: transparent; color: {p.dim}; border-color: transparent; }}
+    QPushButton#ghost:hover {{ background: {p.nav}; color: {p.ink}; border-color: {p.rule}; }}
     QPushButton#primary {{
-        background: {p.brick}; color: {p.paper}; border: 1px solid {p.brick};
-        padding: 0 22px; font-weight: 600;
+        background: {p.brick}; color: {p.on_accent}; border: 1px solid {p.brick};
+        padding: 0 20px; font-weight: 600;
     }}
-    QPushButton#primary:hover {{ background: {p.ink}; border-color: {p.ink}; color: {p.paper}; }}
-    QPushButton#primary:disabled {{ background: {p.paper2}; color: {p.weak}; border-color: {p.rule}; }}
+    QPushButton#primary:hover {{ background: {p.ink}; border-color: {p.ink}; color: {p.paper2}; }}
+    QPushButton#primary:disabled {{ background: {p.nav}; color: {p.weak}; border-color: {p.rule}; }}
 
     QComboBox {{
-        background: {p.paper2}; color: {p.ink};
-        border: 1px solid {p.rule}; border-radius: 0; padding: 4px 8px;
+        background: {p.paper2}; color: {p.ink}; border: 1px solid {p.rule};
+        border-radius: 6px; padding: 6px 10px; min-height: 30px;
     }}
+    QComboBox:hover {{ border-color: {p.dim}; }}
+    QComboBox:focus {{ border: 2px solid {p.brick}; }}
     QComboBox QAbstractItemView {{
         background: {p.paper2}; color: {p.ink}; border: 1px solid {p.rule};
-        selection-background-color: {p.paper}; selection-color: {p.ink};
+        selection-background-color: {p.accent_soft}; selection-color: {p.ink};
     }}
-    QSplitter::handle {{ background: transparent; }}
-    QToolTip {{ background: {p.paper2}; color: {p.ink}; border: 1px solid {p.rule}; padding: 4px 6px; }}
-    QStatusBar {{ color: {p.weak}; background: transparent; }}
-    /* 原生滚条藏掉（参考 ::-webkit-scrollbar width:0）——由星球滚条接管 */
-    QScrollBar:vertical, QScrollBar:horizontal {{ background: transparent; width: 0; height: 0; }}
-    QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{ background: transparent; }}
+    QLineEdit, QPlainTextEdit, QTextBrowser, QListWidget {{
+        background: {p.paper2}; color: {p.ink}; border: 1px solid {p.rule};
+        border-radius: 6px; padding: 7px; selection-background-color: {p.accent_soft};
+        selection-color: {p.ink};
+    }}
+    QLineEdit:focus, QPlainTextEdit:focus, QTextBrowser:focus, QListWidget:focus {{ border: 2px solid {p.brick}; }}
+    QListWidget::item {{ padding: 7px 4px; border-bottom: 1px solid {p.rule}; }}
+    QListWidget::item:hover {{ background: {p.nav}; }}
+    QListWidget::item:selected {{ background: {p.accent_soft}; color: {p.ink}; }}
+
+    QFrame#conversationPanel {{ background: {p.nav}; border: 1px solid {p.rule}; border-radius: 8px; }}
+    QFrame#threadPanel {{ background: {p.paper2}; border: 1px solid {p.rule}; border-radius: 8px; }}
+    QTextBrowser#messageThread {{ background: {p.paper2}; border: none; font-size: 10.5pt; }}
+    QLabel#targetLabel {{ font-size: 12pt; font-weight: 600; }}
+    QLineEdit#chatInput {{ background: {p.paper2}; border-radius: 6px; padding: 8px 10px; }}
+
+    QLabel#galaxyTitle {{ font-size: 14pt; font-weight: 600; }}
+    QLabel#galaxySub {{ color: {p.weak}; font-size: 9pt; }}
+    QLabel#galaxyLegend {{ color: {p.weak}; font-size: 8.5pt; }}
+    QPlainTextEdit#nodeDetail {{ background: {p.paper2}; border: 1px solid {p.rule}; border-radius: 8px; font-size: 10pt; }}
+
+    QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
+    QScrollBar::handle:vertical {{ background: {p.rule}; border-radius: 4px; min-height: 28px; }}
+    QScrollBar::handle:vertical:hover {{ background: {p.dim}; }}
+    QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 2px; }}
+    QScrollBar::handle:horizontal {{ background: {p.rule}; border-radius: 4px; min-width: 28px; }}
     QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
+    QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+
+    QStatusBar {{ background: {p.paper2}; color: {p.weak}; border-top: 1px solid {p.rule}; font-size: 8.5pt; }}
+    QStatusBar QLabel {{ color: {p.weak}; font-size: 8.5pt; }}
+    QToolTip {{ background: {p.paper2}; color: {p.ink}; border: 1px solid {p.rule}; border-radius: 6px; padding: 6px 8px; }}
+    QSplitter::handle {{ background: transparent; }}
     """

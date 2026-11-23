@@ -1,17 +1,10 @@
-"""YoAi 桌面主窗口 — 标准 Qt Widgets 应用。
-
-布局：
-  顶部标题栏：宋体标题 + 副标题 + 深浅主题切换
-  左侧对话区：消息气泡（ChatView）+ 多行输入（Enter 发送，Shift+Enter 换行）
-  右侧侧栏：三张卡片——过程/工具链、个人事实、长期目标（带计数与空状态）
-  底部状态栏：本地状态与模型提示
-
-事件映射：把 Core 的 21 类事件渲染成人类可读的过程步，不改事件语义。
-"""
+"""YoAi 纸墨工作台主窗口。"""
 
 from __future__ import annotations
 
-import json
+import html
+import re
+from datetime import datetime
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -22,12 +15,12 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QTabWidget,
     QVBoxLayout,
@@ -36,237 +29,359 @@ from PySide6.QtWidgets import (
 
 from yoai.agent import YoAiAgent
 from yoai.desktop.chat_panel import ChatPanel
-from yoai.desktop.widgets import ChatView, Composer, SectionCard
+from yoai.desktop.cosmic.theme import Palette
+from yoai.desktop.widgets import ChatView, Composer, MemoryWriteSummary, NavRail, SectionCard
 from yoai.desktop.worker import AgentWorker
 
-def _cosmic_qss(palette) -> str:
-    """从宇宙主题调色板生成 QSS（主题切换时重设）。"""
+
+def _cosmic_qss(palette: Palette) -> str:
     from yoai.desktop.cosmic.theme import qss
+
     return qss(palette)
 
 
 EVENT_LABELS = {
     "strategy_selected": "路由",
-    "plan_created": "规划",
+    "plan_created": "制定计划",
     "tool_call": "调用工具",
-    "tool_result": "工具结果",
+    "tool_result": "工具完成",
     "permission_asked": "请求授权",
-    "permission_denied": "拒绝",
-    "clarify_requested": "澄清",
+    "permission_denied": "拒绝授权",
+    "clarify_requested": "需要澄清",
     "capability_missing": "能力缺口",
     "tool_discovered": "发现工具",
     "context_compacted": "压缩上下文",
     "memories_recalled": "召回记忆",
     "budget_exceeded": "预算超限",
-    "error": "错误",
+    "error": "出错",
     "done": "完成",
 }
 
 
 class MainWindow(QMainWindow):
     def __init__(
-        self, agent: YoAiAgent, title: str = "YoAi", channel=None,
-        registry=None, session_manager=None, evidence_store=None,
+        self,
+        agent: YoAiAgent,
+        title: str = "YoAi",
+        channel=None,
+        registry=None,
+        session_manager=None,
+        evidence_store=None,
         evolution_archive=None,
     ) -> None:
         super().__init__()
         self.agent = agent
         self.channel = channel
         self.registry = registry or {}
-        self.session_manager = session_manager   # 有则启用会话切换
-        self.evidence_store = evidence_store     # 有则自动采集执行证据
+        self.session_manager = session_manager
+        self.evidence_store = evidence_store
         self.evolution_archive = evolution_archive
-        self._collector = None
-        self._current_task = ""
         self.worker: AgentWorker | None = None
-        # 宇宙星球系主题（深空默认，可切纸色）
-        from yoai.desktop.cosmic.theme import Palette, THEME_DEEP
-        self.palette = Palette.deep()
+        self._inspector_auto_hidden = False
+
+        self.palette = Palette.light()
         self.setStyleSheet(_cosmic_qss(self.palette))
         self.setWindowTitle(title)
-        self.resize(960, 680)
-        # 显式中文字体：offscreen 下字体库为空，真实 Windows 下用系统雅黑/等线。
+        self.resize(1180, 760)
+        self.setMinimumSize(980, 640)
         font = QFont()
-        font.setFamilies(["Microsoft YaHei", "DengXian", "SimHei"])
+        font.setFamilies(["Microsoft YaHei", "DengXian", "SimHei", "Segoe UI"])
         font.setPointSize(10)
         self.setFont(font)
+
         self._build_ui()
         self._refresh_sidebar()
-        self.statusBar().showMessage("离线演示模型已就绪 · 试试「记住我偏好深色主题」")
+        self._refresh_memory_summary()
+        self._update_model_chip()
+        self._set_task_state("就绪", "done")
+        self.statusBar().showMessage("纸墨工作台已就绪")
 
-    # --- UI 构建 ---
     def _build_ui(self) -> None:
         central = QWidget()
         central.setObjectName("cosmicRoot")
         self.setCentralWidget(central)
-        outer = QVBoxLayout(central)
-        outer.setContentsMargins(20, 14, 20, 8)
-        outer.setSpacing(12)
+        shell = QHBoxLayout(central)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
 
-        # 顶部标题栏：宋体标题 + 副标题 + 主题切换
-        header = QHBoxLayout()
-        header.setSpacing(10)
-        title = QLabel("YoAi")
-        title.setObjectName("appTitle")
-        subtitle = QLabel("个人自主智能体 · 记住你，也记住你的目标")
-        subtitle.setObjectName("appSub")
-        header.addWidget(title)
-        header.addWidget(subtitle, alignment=Qt.AlignmentFlag.AlignBottom)
-        header.addStretch(1)
-        self.header_theme_btn = QPushButton(self._theme_btn_text())
-        self.header_theme_btn.setObjectName("ghost")
-        self.header_theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.header_theme_btn.clicked.connect(self._toggle_theme)
-        header.addWidget(self.header_theme_btn)
-        outer.addLayout(header)
+        self.nav = NavRail(self.palette)
+        self.nav.navigation_requested.connect(self._show_page)
+        self.nav.theme_requested.connect(self._toggle_theme)
+        shell.addWidget(self.nav)
 
-        header_rule = QFrame()
-        header_rule.setObjectName("rule")
-        header_rule.setFixedHeight(1)
-        outer.addWidget(header_rule)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        shell.addWidget(content, 1)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setHandleWidth(14)
-        outer.addWidget(splitter, 1)
+        self._build_header(content_layout)
 
-        # 左侧：标签页（我的对话 / 通讯 / 星球系）
-        tabs = QTabWidget()
-        tabs.setDocumentMode(True)
-        self.tabs = tabs
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().hide()
+        self.tabs.setObjectName("contentStack")
 
-        # 标签 0：对话区（保留属性名，兼容已有测试）
         chat_tab = QWidget()
-        left_layout = QVBoxLayout(chat_tab)
-        left_layout.setContentsMargins(0, 12, 0, 0)
-        left_layout.setSpacing(10)
-        # 会话选择行（有 SessionManager 时显示）：切换会话即切历史，不再每次新建
-        if self.session_manager is not None:
-            session_row = QHBoxLayout()
-            session_row.setSpacing(8)
-            session_label = QLabel("会话")
-            session_label.setObjectName("fieldLabel")
-            session_row.addWidget(session_label)
-            self.session_combo = QComboBox()
-            self.session_combo.currentIndexChanged.connect(self._on_switch_session)
-            session_row.addWidget(self.session_combo, 1)
-            self.new_session_btn = QPushButton("＋ 新建")
-            self.new_session_btn.setObjectName("ghost")
-            self.new_session_btn.clicked.connect(self._on_new_session)
-            session_row.addWidget(self.new_session_btn)
-            left_layout.addLayout(session_row)
+        chat_layout = QVBoxLayout(chat_tab)
+        chat_layout.setContentsMargins(20, 18, 20, 16)
+        chat_layout.setSpacing(12)
 
-        from yoai.desktop.cosmic.planet_scrollbar import PlanetScrollBar
-        chat_frame = QFrame()
-        chat_frame.setObjectName("chatFrame")
-        chat_row = QHBoxLayout(chat_frame)
-        chat_row.setContentsMargins(16, 12, 4, 12)
-        chat_row.setSpacing(4)
+        chat_surface = QFrame()
+        chat_surface.setObjectName("chatSurface")
+        chat_surface_layout = QVBoxLayout(chat_surface)
+        chat_surface_layout.setContentsMargins(0, 0, 0, 0)
         self.chat = ChatView(self.palette)
-        chat_row.addWidget(self.chat)
-        self.planet_scroll = PlanetScrollBar(self.palette)
-        self.planet_scroll.attach(self.chat)
-        chat_row.addWidget(self.planet_scroll)
-        left_layout.addWidget(chat_frame, 1)
+        chat_surface_layout.addWidget(self.chat)
+        chat_layout.addWidget(chat_surface, 1)
 
-        # 输入区：多行输入 + 发送；下方一行快捷键提示
-        composer_frame = QFrame()
-        composer_frame.setObjectName("composerFrame")
-        input_row = QHBoxLayout(composer_frame)
+        composer_surface = QFrame()
+        composer_surface.setObjectName("composerSurface")
+        composer_layout = QVBoxLayout(composer_surface)
+        composer_layout.setContentsMargins(0, 0, 0, 0)
+        composer_layout.setSpacing(0)
+        input_row = QHBoxLayout()
         input_row.setContentsMargins(0, 0, 0, 0)
-        input_row.setSpacing(8)
-        self.input = Composer("输入任务，Enter 发送，Shift+Enter 换行…")
+        input_row.setSpacing(10)
+        self.input = Composer("输入任务…")
         self.input.returnPressed.connect(self._on_send)
         self.send_btn = QPushButton("发送")
         self.send_btn.setObjectName("primary")
-        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.setMinimumHeight(48)
+        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.clicked.connect(self._on_send)
         input_row.addWidget(self.input, 1)
         input_row.addWidget(self.send_btn, alignment=Qt.AlignmentFlag.AlignBottom)
-        left_layout.addWidget(composer_frame)
-        tabs.addTab(chat_tab, "我的对话")
+        composer_layout.addLayout(input_row)
+        composer_hint = QLabel("Enter 发送 · Shift+Enter 换行 · 工具细节在右侧检查器")
+        composer_hint.setObjectName("composerHint")
+        composer_layout.addWidget(composer_hint)
+        chat_layout.addWidget(composer_surface)
+        self.tabs.addTab(chat_tab, "我的对话")
 
-        # 标签 1：通讯（社交式群聊）
-        if self.channel is not None:
-            self.chat_panel = ChatPanel(self.channel, registry=self.registry)
-            tabs.addTab(self.chat_panel, "通讯")
-        else:
-            self.chat_panel = None
+        self.chat_panel = ChatPanel(self.channel, registry=self.registry, palette=self.palette) if self.channel is not None else None
+        if self.chat_panel is not None:
+            self.chat_panel.selection_changed.connect(self._update_communication_inspector)
+            self.tabs.addTab(self.chat_panel, "通讯")
 
-        # 标签 2：进化星球系（有档案时显示）
+        self.galaxy = None
         if self.evolution_archive is not None:
             from yoai.desktop.cosmic.galaxy import GalaxyView
-            self.galaxy = GalaxyView(self.evolution_archive, self.palette)
-            self.galaxy.theme_btn.clicked.connect(self._toggle_theme)
-            tabs.addTab(self.galaxy, "星球系")
-        else:
-            self.galaxy = None
-        splitter.addWidget(tabs)
 
-        # 右：侧栏三张卡片（工具链 + 事实 + 目标）
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 12, 0, 0)
-        right_layout.setSpacing(12)
-        self.trace = QListWidget()
-        self.trace_card = SectionCard("过程 · 工具链", self.trace, "发送一条任务后，这里会逐步显示路由、工具调用与结果。")
-        right_layout.addWidget(self.trace_card, 3)
-        self.facts = QListWidget()
-        self.facts_card = SectionCard("个人事实", self.facts, "还没有记住任何事实。试试「记住我偏好深色主题」。")
-        right_layout.addWidget(self.facts_card, 2)
-        self.goals = QListWidget()
-        self.goals_card = SectionCard("长期目标", self.goals, "还没有目标。试试「创建一个目标：完成 YoAi 原型」。")
-        right_layout.addWidget(self.goals_card, 2)
-        # 左下角风格入口：只露一弧的暗星球 + 浮动卫星（参考 .set-orb / .wx-orb）
-        from yoai.desktop.cosmic.dark_orb import DarkOrbButton
-        self.orbit_btn = DarkOrbButton(self.palette, "进化星球系")
-        self.orbit_btn.setObjectName("orbitEntry")
-        self.orbit_btn.clicked.connect(self._open_galaxy)
-        right_layout.addWidget(self.orbit_btn, alignment=Qt.AlignmentFlag.AlignBottom)
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([640, 360])
+            self.galaxy = GalaxyView(self.evolution_archive, self.palette)
+            self.tabs.addTab(self.galaxy, "星球系")
+
+        self.nav.set_available("communication", self.chat_panel is not None)
+        self.nav.set_available("galaxy", self.galaxy is not None)
+
+        body = QSplitter(Qt.Horizontal)
+        body.setHandleWidth(10)
+        body.addWidget(self.tabs)
+        self.inspector = self._build_inspector()
+        body.addWidget(self.inspector)
+        body.setStretchFactor(0, 1)
+        body.setStretchFactor(1, 0)
+        body.setSizes([820, 320])
+        self.content_splitter = body
+        content_layout.addWidget(body, 1)
 
         self.setStatusBar(QStatusBar())
+        self.status_model_label = QLabel("本地状态")
+        self.status_model_label.setObjectName("fieldLabel")
+        self.statusBar().addPermanentWidget(self.status_model_label)
         if self.session_manager is not None:
             self._refresh_sessions()
+        else:
+            self.session_combo = None
+            self.new_session_btn = None
+            self._load_history()
 
-    # --- 宇宙主题 ---
-    def _theme_btn_text(self) -> str:
-        from yoai.desktop.cosmic.theme import THEME_PAPER
-        return "★ 切到深色" if self.palette.name == THEME_PAPER else "☀ 切到纸色"
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self._on_tab_changed(0)
+
+    def _build_header(self, content_layout: QVBoxLayout) -> None:
+        header = QFrame()
+        header.setObjectName("topBar")
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(10)
+
+        self.page_title = QLabel("我的对话")
+        self.page_title.setObjectName("pageTitle")
+        layout.addWidget(self.page_title)
+
+        if self.session_manager is not None:
+            self.session_label = QLabel("会话")
+            self.session_label.setObjectName("fieldLabel")
+            layout.addWidget(self.session_label)
+            self.session_combo = QComboBox()
+            self.session_combo.setMinimumWidth(190)
+            self.session_combo.setMaximumWidth(260)
+            self.session_combo.currentIndexChanged.connect(self._on_switch_session)
+            layout.addWidget(self.session_combo)
+            self.new_session_btn = QPushButton("＋ 新建")
+            self.new_session_btn.setObjectName("ghost")
+            self.new_session_btn.clicked.connect(self._on_new_session)
+            layout.addWidget(self.new_session_btn)
+
+        layout.addStretch(1)
+        self.model_chip = QLabel("模型 · 离线演示")
+        self.model_chip.setObjectName("modelChip")
+        layout.addWidget(self.model_chip)
+        self.task_state_label = QLabel("就绪")
+        self.task_state_label.setObjectName("taskState")
+        layout.addWidget(self.task_state_label)
+        self.inspector_toggle_btn = QPushButton("检查器")
+        self.inspector_toggle_btn.setObjectName("ghost")
+        self.inspector_toggle_btn.clicked.connect(lambda: self._set_inspector_visible(True))
+        layout.addWidget(self.inspector_toggle_btn)
+        content_layout.addWidget(header)
+
+    def _build_inspector(self) -> QWidget:
+        inspector = QFrame()
+        inspector.setObjectName("inspector")
+        layout = QVBoxLayout(inspector)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(14)
+
+        head = QHBoxLayout()
+        self.inspector_title = QLabel("本轮检查器")
+        self.inspector_title.setObjectName("inspectorTitle")
+        head.addWidget(self.inspector_title)
+        head.addStretch(1)
+        self.collapse_inspector_btn = QPushButton("收起")
+        self.collapse_inspector_btn.setObjectName("ghost")
+        self.collapse_inspector_btn.clicked.connect(lambda: self._set_inspector_visible(False))
+        head.addWidget(self.collapse_inspector_btn)
+        layout.addLayout(head)
+
+        self.inspector_stack = QStackedWidget()
+        main_page = QWidget()
+        main_layout = QVBoxLayout(main_page)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(16)
+
+        self.trace = QListWidget()
+        self.trace_card = SectionCard("执行过程", self.trace, "发送任务后，这里会显示可读的执行步骤。")
+        main_layout.addWidget(self.trace_card, 3)
+        self.facts = QListWidget()
+        self.facts_card = SectionCard("个人事实", self.facts, "还没有个人事实。")
+        main_layout.addWidget(self.facts_card, 2)
+        self.goals = QListWidget()
+        self.goals_card = SectionCard("长期目标", self.goals, "还没有长期目标。")
+        main_layout.addWidget(self.goals_card, 2)
+        self.memory_summary = MemoryWriteSummary(self.palette)
+        main_layout.addWidget(self.memory_summary)
+        self.inspector_stack.addWidget(main_page)
+
+        communication_page = QWidget()
+        communication_layout = QVBoxLayout(communication_page)
+        communication_layout.setContentsMargins(0, 0, 0, 0)
+        communication_layout.setSpacing(16)
+        self.comm_target_value = self._context_value("当前会话", "选择一个会话")
+        self.comm_members_value = self._context_value("会话成员", "—")
+        self.comm_external_value = self._context_value("外部智能体", "—")
+        communication_layout.addWidget(self.comm_target_value[0])
+        communication_layout.addWidget(self.comm_members_value[0])
+        communication_layout.addWidget(self.comm_external_value[0])
+        communication_layout.addStretch(1)
+        self.inspector_stack.addWidget(communication_page)
+        layout.addWidget(self.inspector_stack, 1)
+        return inspector
+
+    @staticmethod
+    def _context_value(title: str, value: str) -> tuple[QWidget, QLabel]:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        label = QLabel(title)
+        label.setObjectName("contextLabel")
+        content = QLabel(value)
+        content.setObjectName("contextValue")
+        content.setWordWrap(True)
+        layout.addWidget(label)
+        layout.addWidget(content)
+        return widget, content
+
+    def _show_page(self, key: str) -> None:
+        if key == "chat":
+            self.tabs.setCurrentIndex(0)
+        elif key == "communication" and self.chat_panel is not None:
+            self.tabs.setCurrentIndex(self.tabs.indexOf(self.chat_panel))
+        elif key == "galaxy":
+            self._open_galaxy()
+
+    def _on_tab_changed(self, index: int) -> None:
+        widget = self.tabs.widget(index)
+        if widget is self.chat_panel:
+            key = "communication"
+            title = "通讯"
+            self.inspector_title.setText("会话检查器")
+            self.inspector_stack.setCurrentIndex(1)
+            self._update_communication_inspector()
+        elif widget is self.galaxy:
+            key = "galaxy"
+            title = "星球系"
+            self.inspector_title.setText("本轮检查器")
+            self.inspector_stack.setCurrentIndex(0)
+        else:
+            key = "chat"
+            title = "我的对话"
+            self.inspector_title.setText("本轮检查器")
+            self.inspector_stack.setCurrentIndex(0)
+        self.nav.set_active(key)
+        self.page_title.setText(title)
+        if self.session_manager is not None:
+            self.session_label.setVisible(key == "chat")
+            self.session_combo.setVisible(key == "chat")
+            self.new_session_btn.setVisible(key == "chat")
+        if self.galaxy is not None:
+            self.galaxy.starfield.set_active(widget is self.galaxy)
+        if widget is self.galaxy:
+            self._set_inspector_visible(False)
+        elif self.width() >= 1100 or self.inspector.isVisible():
+            self._set_inspector_visible(True)
+
+    def _set_inspector_visible(self, visible: bool) -> None:
+        if self.tabs.currentWidget() is self.galaxy:
+            visible = False
+        self.inspector.setVisible(visible)
+        self.inspector_toggle_btn.setVisible(not visible and self.tabs.currentWidget() is not self.galaxy)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if not hasattr(self, "inspector"):
+            return
+        if self.width() < 1100 and self.inspector.isVisible() and self.tabs.currentWidget() is not self.galaxy:
+            self._inspector_auto_hidden = True
+            self._set_inspector_visible(False)
+        elif self.width() >= 1100 and self._inspector_auto_hidden and self.tabs.currentWidget() is not self.galaxy:
+            self._inspector_auto_hidden = False
+            self._set_inspector_visible(True)
 
     def _toggle_theme(self) -> None:
-        """深浅切换：重设 QSS + 星球系调色板（对齐参考"主题从右上角球向外推开"的入口）。"""
-        from yoai.desktop.cosmic.theme import Palette, THEME_PAPER
-        self.palette = Palette.light() if self.palette.name != THEME_PAPER else Palette.deep()
+        self.palette = Palette.dark() if self.palette.name == "light" else Palette.light()
         self.setStyleSheet(_cosmic_qss(self.palette))
+        self.nav.set_palette(self.palette)
+        self.chat.set_palette(self.palette)
+        self.memory_summary.set_palette(self.palette)
+        if self.chat_panel is not None:
+            self.chat_panel.set_palette(self.palette)
         if self.galaxy is not None:
             self.galaxy.set_palette(self.palette)
-            self.galaxy.theme_btn.setText(
-                "★ 深空宇宙" if self.palette.name == THEME_PAPER else "☀ 纸色白天"
-            )
-        self.orbit_btn.set_palette(self.palette)
-        self.chat.set_palette(self.palette)
-        self.header_theme_btn.setText(self._theme_btn_text())
-        self._refresh_sidebar()
         self._recolor_trace()
-        if hasattr(self, "planet_scroll"):
-            self.planet_scroll.set_palette(self.palette)
-        self.statusBar().showMessage(
-            "已切换到纸色白天" if self.palette.name == THEME_PAPER else "已切换到深空宇宙"
-        )
+        self._refresh_sidebar()
+        self._refresh_memory_summary()
+        self.statusBar().showMessage("已切换到深色主题" if self.palette.name == "dark" else "已切换到纸色主题")
 
     def _open_galaxy(self) -> None:
         if self.galaxy is not None:
-            idx = self.tabs.indexOf(self.galaxy)
-            if idx >= 0:
-                self.tabs.setCurrentIndex(idx)
+            index = self.tabs.indexOf(self.galaxy)
+            if index >= 0:
+                self.tabs.setCurrentIndex(index)
 
-    # --- 会话切换 ---
     def _refresh_sessions(self) -> None:
-        """重建会话下拉；无会话时自动建一个默认会话。"""
         sessions = self.session_manager.list_sessions()
         if not sessions:
             self.session_manager.create("新会话")
@@ -274,23 +389,33 @@ class MainWindow(QMainWindow):
         self.session_combo.blockSignals(True)
         self.session_combo.clear()
         current = self.session_manager.current
-        for s in sessions:
-            self.session_combo.addItem(f"{s.name}  ({s.id})", s.id)
+        for session in sessions:
+            label = session.name
+            try:
+                created = datetime.fromisoformat(session.created_at.replace("Z", "+00:00"))
+                label = f"{label} · {created:%m月%d日 %H:%M}"
+            except ValueError:
+                pass
+            self.session_combo.addItem(label, session.id)
+            self.session_combo.setItemData(self.session_combo.count() - 1, f"会话 ID：{session.id}", Qt.ItemDataRole.ToolTipRole)
         if current:
-            idx = self.session_combo.findData(current.id)
-            if idx >= 0:
-                self.session_combo.setCurrentIndex(idx)
+            index = self.session_combo.findData(current.id)
+            if index >= 0:
+                self.session_combo.setCurrentIndex(index)
         self.session_combo.blockSignals(False)
         self.agent = self.session_manager.current_agent()
         self._load_history()
 
-    def _on_switch_session(self, _idx: int) -> None:
-        sid = self.session_combo.currentData()
-        if not sid or self.session_manager is None:
+    def _on_switch_session(self, index: int) -> None:
+        session_id = self.session_combo.currentData()
+        if not session_id or self.session_manager is None:
             return
-        self.session_manager.switch(str(sid))
+        self.session_manager.switch(str(session_id))
         self.agent = self.session_manager.current_agent()
         self._load_history()
+        self._refresh_sidebar()
+        self._refresh_memory_summary()
+        self._update_model_chip()
         self.statusBar().showMessage(f"已切换到会话：{self.session_manager.current.name}")
 
     def _on_new_session(self) -> None:
@@ -298,30 +423,47 @@ class MainWindow(QMainWindow):
             return
         self.session_manager.create("新会话")
         self._refresh_sessions()
+        self._refresh_sidebar()
+        self._refresh_memory_summary()
+        self._update_model_chip()
         self.statusBar().showMessage("已新建会话")
 
+    @staticmethod
+    def _clean_final_text(text: str) -> str:
+        def replace_tool_output(match: re.Match[str]) -> str:
+            inner = re.sub(r"<[^>]+>", "", match.group(1))
+            return html.unescape(inner).strip()
+
+        cleaned = re.sub(
+            r"<tool_output\b[^>]*>(.*?)</tool_output>",
+            replace_tool_output,
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
     def _load_history(self) -> None:
-        """切换会话后把持久化历史渲染回对话区。"""
         self.chat.clear()
         if self.session_manager is None:
             return
         try:
-            from yai_core.types import ChatMessage
             history = self.agent.core.memory.history()
-            for msg in history:
-                role = getattr(msg, "role", "")
-                content = getattr(msg, "content", "")
+            for message in history:
+                role = getattr(message, "role", "")
+                if role not in ("user", "assistant"):
+                    continue
+                content = getattr(message, "content", "")
                 if isinstance(content, list):
                     content = " ".join(
-                        str(p.get("text", "")) for p in content if isinstance(p, dict)
+                        str(part.get("text", "")) for part in content if isinstance(part, dict)
                     )
                 label = {"user": "我", "assistant": "YoAi"}.get(role, role)
-                self.chat.add_message(label, str(content), time="", render=False)
-        except Exception:  # noqa: BLE001 - 历史渲染失败不阻断对话
+                cleaned = self._clean_final_text(str(content)) if role == "assistant" else str(content)
+                self.chat.add_message(label, cleaned, time="", render=False)
+        except Exception:  # noqa: BLE001
             pass
         self.chat.render_all()
 
-    # --- 交互 ---
     def _on_send(self) -> None:
         text = self.input.text().strip()
         if not text:
@@ -334,22 +476,29 @@ class MainWindow(QMainWindow):
         self.trace.clear()
         self.trace_card.set_count(0)
         self.send_btn.setEnabled(False)
-        self.send_btn.setText("思考中…")
+        self.send_btn.setText("执行中")
+        self.memory_summary.set_running(True)
+        self._set_task_state("执行中", "running")
+        self.statusBar().showMessage("任务执行中…")
 
         from yoai.evolution.fingerprint import fingerprint
-        fp = fingerprint(text)
+
+        task_fingerprint = fingerprint(text)
         evidence_meta = {
             "session_id": self.session_manager.current.id if self.session_manager and self.session_manager.current else "",
-            "task_fingerprint": fp.key,
-            "fingerprint_tags": fp.tags,
-            "sample_class": "evolution",   # 日常对话=进化样本；验证样本由 BenchmarkLab 单独构造
-            "expert_id": None,             # M1 路由接入后填 RouteDecision.selected_id
+            "task_fingerprint": task_fingerprint.key,
+            "fingerprint_tags": task_fingerprint.tags,
+            "sample_class": "evolution",
+            "expert_id": None,
             "parent_id": None,
             "model_provider": getattr(self.agent, "model", None),
         }
         worker = AgentWorker(
-            self.agent, text, self,
-            evidence_store=self.evidence_store, evidence_meta=evidence_meta,
+            self.agent,
+            text,
+            self,
+            evidence_store=self.evidence_store,
+            evidence_meta=evidence_meta,
         )
         worker.event_received.connect(self._on_event)
         worker.task_done.connect(self._on_done)
@@ -358,61 +507,118 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_event(self, event_type: str, data: dict[str, Any]) -> None:
+        if event_type in ("tier_changed", "model_message"):
+            return
         label = EVENT_LABELS.get(event_type, event_type)
         if event_type == "strategy_selected":
-            self._append_trace(f"{label}: {data.get('strategy', '')}")
-        elif event_type in ("tool_call", "tool_result"):
-            tool = data.get("tool", "")
-            detail = data.get("arguments", data.get("result", ""))
-            self._append_trace(
-                f"{label}: {tool} {str(detail)[:120]}",
-                kind="dim" if event_type == "tool_result" else "",
-            )
+            strategy = data.get("strategy", "")
+            self._append_trace(f"{label}：{strategy}")
+        elif event_type == "tool_call":
+            self._append_trace(f"{label}：{data.get('tool', '')}", detail=str(data.get("arguments", "")))
+        elif event_type == "tool_result":
+            self._append_trace(f"{label}：{data.get('tool', '')}", kind="dim", detail=str(data.get("result", "")))
         elif event_type == "done":
-            self._append_trace(f"{label}", kind="ok")
+            self._append_trace(label, kind="ok")
         elif event_type in ("error", "permission_denied", "budget_exceeded"):
-            self._append_trace(label, kind="bad")
+            self._append_trace(label, kind="bad", detail=str(data))
         else:
             self._append_trace(label)
 
     def _on_done(self, final_text: str) -> None:
-        self._append_chat("YoAi", final_text or "（无最终文本）")
+        cleaned = self._clean_final_text(final_text) or "（任务完成，但没有返回最终文本）"
+        self._append_chat("YoAi", cleaned)
         self.send_btn.setEnabled(True)
         self.send_btn.setText("发送")
         self._refresh_sidebar()
+        self._refresh_memory_summary()
         if self.session_manager is not None:
-            self.session_manager.touch(delta=2)  # 一轮 user + assistant
+            self.session_manager.touch(delta=2)
         if self.galaxy is not None:
-            self.galaxy.refresh()  # 证据/候选变化时重绘星图
+            self.galaxy.refresh()
+        self._set_task_state("已完成", "done")
         self.statusBar().showMessage("任务完成")
 
     def _on_error(self, message: str) -> None:
-        self._append_chat("YoAi", f"出错了：{message}")
+        self._append_chat("YoAi", f"任务失败：{message}")
         self.send_btn.setEnabled(True)
         self.send_btn.setText("发送")
-        self.statusBar().showMessage("任务失败")
+        self.memory_summary.set_running(False)
+        self._set_task_state("失败", "error")
+        self.statusBar().showMessage("任务失败，可修改输入后重试")
 
-    # --- 渲染辅助 ---
     def _append_chat(self, who: str, text: str) -> None:
         self.chat.add_message(who, text)
+
+    def _set_task_state(self, text: str, state: str) -> None:
+        self.task_state_label.setText(text)
+        self.task_state_label.setProperty("state", state)
+        self.task_state_label.style().unpolish(self.task_state_label)
+        self.task_state_label.style().polish(self.task_state_label)
+
+    def _update_model_chip(self) -> None:
+        provider = getattr(self.agent, "model", None)
+        base = getattr(provider, "base", provider)
+        model = ""
+        if hasattr(base, "_config"):
+            try:
+                model = str(base._config()[2])
+            except Exception:  # noqa: BLE001
+                model = ""
+        if not model:
+            model = "离线 Demo" if type(base).__name__ == "DemoModel" else getattr(base, "name", type(base).__name__)
+        self.model_chip.setText(f"模型 · {model}")
+        self.status_model_label.setText(f"{model} · 本地状态已加载")
+
+    def _refresh_memory_summary(self) -> None:
+        if hasattr(self.agent, "last_write_stats"):
+            self.memory_summary.set_stats(self.agent.last_write_stats())
+        else:
+            self.memory_summary.set_running(False)
+
+    def _update_communication_inspector(self) -> None:
+        panel = self.chat_panel
+        if panel is None:
+            return
+        target = panel._current_target
+        if not target:
+            self.comm_target_value[1].setText("选择一个会话")
+            self.comm_members_value[1].setText("—")
+        else:
+            group = next((group for group in panel.channel.groups() if group.id == target), None)
+            if group is not None:
+                self.comm_target_value[1].setText(f"{group.name} · {len(group.members)} 人")
+                names = [panel.channel.peers[member].name for member in group.members if member in panel.channel.peers]
+                self.comm_members_value[1].setText("、".join(names) or "—")
+            else:
+                peer = panel.channel.peers.get(target)
+                self.comm_target_value[1].setText(peer.name if peer else target)
+                self.comm_members_value[1].setText("单聊")
+        levels = {"L2": 0, "L1": 0, "L0": 0}
+        for adapter in panel.registry.values():
+            level = adapter.level
+            levels[level] = levels.get(level, 0) + 1
+        self.comm_external_value[1].setText(
+            f"L2 自动回答 {levels.get('L2', 0)} · L1 人工接力 {levels.get('L1', 0)}"
+        )
 
     _TRACE_ROLE = Qt.ItemDataRole.UserRole + 1
 
     def _trace_color(self, kind: str) -> str:
-        p = self.palette
-        return {"ok": p.ok, "bad": p.vermilion, "dim": p.dim}.get(kind, p.ink)
+        return {"ok": self.palette.ok, "bad": self.palette.vermilion, "dim": self.palette.weak}.get(kind, self.palette.ink)
 
-    def _append_trace(self, text: str, kind: str = "") -> None:
+    def _append_trace(self, text: str, kind: str = "", detail: str = "") -> None:
         item = QListWidgetItem(f"{self.trace.count() + 1:02d}  {text}")
         item.setData(self._TRACE_ROLE, kind)
+        if detail:
+            item.setToolTip(detail[:1000])
         item.setForeground(QColor(self._trace_color(kind)))
         self.trace.addItem(item)
         self.trace.scrollToBottom()
         self.trace_card.set_count(self.trace.count())
 
     def _recolor_trace(self) -> None:
-        for i in range(self.trace.count()):
-            item = self.trace.item(i)
+        for index in range(self.trace.count()):
+            item = self.trace.item(index)
             item.setForeground(QColor(self._trace_color(item.data(self._TRACE_ROLE) or "")))
 
     def _refresh_sidebar(self) -> None:
@@ -432,15 +638,18 @@ class MainWindow(QMainWindow):
             self.goals.addItem(item)
         self.goals_card.set_count(len(goals))
 
-    def closeEvent(self, event) -> None:  # noqa: N802 - Qt 约定
+    def closeEvent(self, event) -> None:  # noqa: N802
         if self.worker is not None and self.worker.isRunning():
             self.worker.requestInterruption()
             self.worker.wait(2000)
+        if self.chat_panel is not None:
+            self.chat_panel.shutdown()
+        if self.galaxy is not None:
+            self.galaxy.starfield.set_active(False)
         super().closeEvent(event)
 
 
 def build_app(agent: YoAiAgent | None = None, title: str = "YoAi") -> tuple[QApplication, MainWindow]:
-    """构造 QApplication 与主窗口（不进入事件循环，便于测试 offscreen）。"""
     app = QApplication.instance() or QApplication([])
-    win = MainWindow(agent or YoAiAgent(), title)
-    return app, win
+    window = MainWindow(agent or YoAiAgent(), title)
+    return app, window

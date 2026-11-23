@@ -19,7 +19,7 @@ from typing import Any
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QHBoxLayout, QLabel, QPlainTextEdit,
     QSplitter, QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -159,12 +159,16 @@ class GalaxyView(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
 
         header = QHBoxLayout()
-        title = QLabel("进化星球系  ·  恒星=根节点  行星=专家  轨道=血统  光晕=生命周期")
-        header.addWidget(title)
-        self.theme_btn = QPushButton("☀ 纸色白天" if self.palette.name != THEME_PAPER else "★ 深空宇宙")
-        self.theme_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        title_block = QVBoxLayout()
+        title_block.setSpacing(3)
+        title = QLabel("进化星球系")
+        title.setObjectName("galaxyTitle")
+        subtitle = QLabel("恒星=根节点 · 行星=专家 · 轨道=血统 · 光晕=生命周期")
+        subtitle.setObjectName("galaxySub")
+        title_block.addWidget(title)
+        title_block.addWidget(subtitle)
+        header.addLayout(title_block)
         header.addStretch(1)
-        header.addWidget(self.theme_btn)
         root.addLayout(header)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -189,15 +193,20 @@ class GalaxyView(QWidget):
 
         detail = QWidget()
         dl = QVBoxLayout(detail)
-        dl.addWidget(QLabel("节点详情"))
+        detail_title = QLabel("节点详情")
+        detail_title.setObjectName("contextLabel")
+        dl.addWidget(detail_title)
         self.detail = QPlainTextEdit()
+        self.detail.setObjectName("nodeDetail")
         self.detail.setReadOnly(True)
         self.detail.setPlaceholderText("点击一颗星球查看专家节点详情…")
-        dl.addWidget(self.detail)
+        dl.addWidget(self.detail, 1)
         self.legend = QLabel(
-            "生命周期：●active 朱红(发光)  ●probation 琥珀(微光)  "
-            "●candidate 灰(暗淡)  ●retired 深赭(熄灭)"
+            "生命周期：● active 运行中 · ● probation 试用 · "
+            "● candidate 候选 · ● retired 已退役"
         )
+        self.legend.setObjectName("galaxyLegend")
+        self.legend.setWordWrap(True)
         dl.addWidget(self.legend)
         splitter.addWidget(detail)
         splitter.setStretchFactor(0, 3)
@@ -230,9 +239,13 @@ class GalaxyView(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        # 首次显示时给星图足够宽度（QSplitter 初始按 sizeHint 会挤扁叠加层）
-        self._splitter.setSizes([int(self.width() * 0.62), int(self.width() * 0.38)])
+        self.starfield.set_active(True)
+        self._splitter.setSizes([int(self.width() * 0.66), int(self.width() * 0.34)])
         self.field.layout_nodes(self.archive)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self.starfield.set_active(False)
+        super().hideEvent(event)
 
     def set_palette(self, palette: Palette) -> None:
         self.palette = palette

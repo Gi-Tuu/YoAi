@@ -53,13 +53,33 @@ class StarfieldWidget(QWidget):
         self._t = 0.0
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self._active = True
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(50)
+
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+        self._sync_timer()
+
+    def _sync_timer(self) -> None:
+        if self._active and self.isVisible() and self.palette.name == THEME_DARK:
+            if not self._timer.isActive():
+                self._timer.start(50)
+        else:
+            self._timer.stop()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._sync_timer()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._timer.stop()
+        super().hideEvent(event)
 
     def set_palette(self, palette: Palette) -> None:
         self.palette = palette
         self._seed()
+        self._sync_timer()
         self.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802

@@ -1,23 +1,16 @@
-"""通讯面板 — 像社交软件的会话界面。
-
-组成：会话列表（peer 单聊 / 群）、消息区、输入框、建群/拉人按钮。
-消息经 ChannelWorker 在后台发送，channel.on_message 回调把每条消息（含各 peer
-回复）送回 UI 追加渲染，不阻塞主线程。
-"""
+"""通讯页：会话列表、消息线程与外部智能体接入。"""
 
 from __future__ import annotations
 
-from typing import Any
-
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -26,81 +19,115 @@ from PySide6.QtWidgets import (
 
 from yoai.chat import Channel, Message
 from yoai.desktop.chat_worker import ChannelWorker
+from yoai.desktop.cosmic.theme import Palette
+from yoai.desktop.widgets import ChatTranscript
 
 
 class ChatPanel(QWidget):
-    def __init__(self, channel: Channel, registry=None, parent=None) -> None:
+    selection_changed = Signal()
+
+    def __init__(self, channel: Channel, registry=None, parent=None, *, palette: Palette | None = None) -> None:
         super().__init__(parent)
         self.channel = channel
         self.registry = registry or {}
+        self.palette = palette or Palette.light()
         self.worker: ChannelWorker | None = None
-        self._current_target = ""   # peer id 或 group id
+        self._current_target = ""
         self._build_ui()
         self._refresh_conversations()
-        # 渲染统一走 ChannelWorker.message_produced（Qt signal，线程安全）。
-        # 不使用 channel.on_message 渲染，避免同一条消息被渲染两次。
 
-    # --- UI ---
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 16)
+        root.setSpacing(12)
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(10)
         root.addWidget(splitter)
 
-        # 左：会话列表 + 建群
-        left = QWidget()
+        left = QFrame()
+        left.setObjectName("conversationPanel")
         left_layout = QVBoxLayout(left)
-        left_layout.addWidget(QLabel("会话"))
+        left_layout.setContentsMargins(14, 14, 14, 14)
+        left_layout.setSpacing(8)
+
+        conversations_title = QLabel("会话")
+        conversations_title.setObjectName("contextLabel")
+        left_layout.addWidget(conversations_title)
         self.conversations = QListWidget()
         self.conversations.currentItemChanged.connect(self._on_select_conversation)
-        left_layout.addWidget(self.conversations)
-        btn_row = QHBoxLayout()
+        left_layout.addWidget(self.conversations, 3)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
         self.new_group_btn = QPushButton("建群")
         self.new_group_btn.clicked.connect(self._on_new_group)
         self.add_member_btn = QPushButton("拉人")
         self.add_member_btn.clicked.connect(self._on_add_member)
-        btn_row.addWidget(self.new_group_btn)
-        btn_row.addWidget(self.add_member_btn)
-        left_layout.addLayout(btn_row)
-        # 外部智能体清单（L2 真接入 / L1 仅唤起 / L0 未发现）
-        left_layout.addWidget(QLabel("外部智能体（点选加入会话）"))
+        button_row.addWidget(self.new_group_btn)
+        button_row.addWidget(self.add_member_btn)
+        left_layout.addLayout(button_row)
+
+        external_title = QLabel("外部智能体 · 双击加入当前群")
+        external_title.setObjectName("contextLabel")
+        left_layout.addWidget(external_title)
         self.external_list = QListWidget()
         self.external_list.itemDoubleClicked.connect(self._on_add_external)
-        left_layout.addWidget(self.external_list)
+        left_layout.addWidget(self.external_list, 2)
         splitter.addWidget(left)
 
-        # 右：消息区 + 输入
-        right = QWidget()
+        right = QFrame()
+        right.setObjectName("threadPanel")
         right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(18, 16, 18, 16)
+        right_layout.setSpacing(12)
         self.target_label = QLabel("选择一个会话")
+        self.target_label.setObjectName("targetLabel")
         right_layout.addWidget(self.target_label)
-        self.messages = QPlainTextEdit()
-        self.messages.setReadOnly(True)
+
+        self.messages = ChatTranscript(self.palette)
         self.messages.setPlaceholderText("选择会话后开始聊天…")
-        right_layout.addWidget(self.messages)
+        right_layout.addWidget(self.messages, 1)
+
         input_row = QHBoxLayout()
+        input_row.setSpacing(10)
         self.chat_input = QLineEdit()
-        self.chat_input.setPlaceholderText("输入消息，回车发送到当前会话…")
+        self.chat_input.setObjectName("chatInput")
+        self.chat_input.setPlaceholderText("输入消息，回车发送…")
         self.chat_input.returnPressed.connect(self._on_send)
         self.chat_send_btn = QPushButton("发送")
+        self.chat_send_btn.setObjectName("primary")
+        self.chat_send_btn.setMinimumHeight(38)
         self.chat_send_btn.clicked.connect(self._on_send)
-        input_row.addWidget(self.chat_input)
+        input_row.addWidget(self.chat_input, 1)
         input_row.addWidget(self.chat_send_btn)
         right_layout.addLayout(input_row)
         splitter.addWidget(right)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([260, 620])
 
-    # --- 会话列表 ---
+    def set_palette(self, palette: Palette) -> None:
+        self.palette = palette
+        self.messages.set_palette(palette)
+
     def _refresh_conversations(self) -> None:
+        target = self._current_target
         self.conversations.clear()
         for peer in self.channel.peers.values():
-            item = QListWidgetItem(f"● {peer.name}  ({peer.id})")
-            item.setData(Qt.UserRole, peer.id)
+            item = QListWidgetItem(f"●  {peer.name}")
+            item.setData(Qt.ItemDataRole.UserRole, peer.id)
+            item.setToolTip(f"单聊 · {peer.id}")
             self.conversations.addItem(item)
         for group in self.channel.groups():
-            item = QListWidgetItem(f"◉ {group.name}  ({len(group.members)}人)")
-            item.setData(Qt.UserRole, group.id)
+            item = QListWidgetItem(f"◉  {group.name} · {len(group.members)} 人")
+            item.setData(Qt.ItemDataRole.UserRole, group.id)
+            item.setToolTip(f"群会话 · {group.id}")
             self.conversations.addItem(item)
+        if target:
+            for index in range(self.conversations.count()):
+                if self.conversations.item(index).data(Qt.ItemDataRole.UserRole) == target:
+                    self.conversations.setCurrentRow(index)
+                    break
         self._refresh_external()
 
     def _refresh_external(self) -> None:
@@ -110,69 +137,68 @@ class ChatPanel(QWidget):
         from yoai.adapters import ExternalPeer
 
         for name, adapter in self.registry.items():
-            d = adapter.describe()
-            mark = "✓" if d["available"] else "✗"
-            text = f"{mark} [{d['level']}] {name}"
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, name)
+            description = adapter.describe()
+            mark = "✓" if description["available"] else "—"
+            item = QListWidgetItem(f"{mark}  [{description['level']}] {name}")
+            item.setData(Qt.ItemDataRole.UserRole, name)
             item.setToolTip(
-                f"{name} · {d['level']}\n"
-                f"可用：{d['available']}\n"
-                + ("L2：可自动回答" if d["level"] == "L2"
-                   else "L1：仅唤起应用 + 投递文件，需人工转发")
+                f"{name} · {description['level']}\n"
+                f"可用：{description['available']}\n"
+                + ("L2：可自动回答" if description["level"] == "L2" else "L1：投递文件，需人工转发")
             )
             self.external_list.addItem(item)
 
     def _on_add_external(self, item: QListWidgetItem) -> None:
-        """双击外部智能体：注册为 ExternalPeer 并加入当前群（若有）。"""
         from yoai.adapters import ExternalPeer
 
-        name = str(item.data(Qt.UserRole))
+        name = str(item.data(Qt.ItemDataRole.UserRole))
         adapter = self.registry.get(name)
         if not adapter:
             return
         peer_id = f"ext-{name}"
         if peer_id not in self.channel.peers:
             self.channel.register(ExternalPeer(peer_id, adapter))
-        # 加入当前选中的群
-        group = next((g for g in self.channel.groups() if g.id == self._current_target), None)
+        group = next((group for group in self.channel.groups() if group.id == self._current_target), None)
         if group:
             added = self.channel.add_member(group.id, peer_id)
-            self.status_tip = f"{name} 已加入群「{group.name}」" if added else "已在群中"
+            self.status_tip = f"{name} 已加入群「{group.name}」" if added else f"{name} 已在群中"
         else:
-            self.status_tip = f"{name} 已注册为 peer（选择一个群后拉入）"
+            self.status_tip = f"{name} 已注册，选择群后可加入"
         self._refresh_conversations()
+        self.selection_changed.emit()
 
     def _on_select_conversation(self, current, _previous) -> None:
         if current is None:
             self._current_target = ""
             self.target_label.setText("选择一个会话")
+            self.messages.clear()
+            self.selection_changed.emit()
             return
-        self._current_target = str(current.data(Qt.UserRole))
-        # 群会话显示群名，peer 会话显示智能体名
-        group = next((g for g in self.channel.groups() if g.id == self._current_target), None)
-        if group:
+        self._current_target = str(current.data(Qt.ItemDataRole.UserRole))
+        group = next((group for group in self.channel.groups() if group.id == self._current_target), None)
+        if group is not None:
             label = group.name
         else:
             peer = self.channel.peers.get(self._current_target)
             label = peer.name if peer else self._current_target
-        self.target_label.setText(f"当前会话：{label}")
+        self.target_label.setText(label)
         self.messages.clear()
-        for msg in self.channel.history(self._current_target):
-            self._render_message(msg)
+        for message in self.channel.history(self._current_target):
+            self._render_message(message)
+        self.selection_changed.emit()
 
-    # --- 建群 / 拉人 ---
     def _on_new_group(self) -> None:
-        name, ok = QInputDialog.getText(self, "建群", "群名称：")
+        name, ok = QInputDialog.getText(self, "建群", "群名称")
         if not ok or not name.strip():
             return
         peer_ids = list(self.channel.peers.keys())
         group = self.channel.create_group(name.strip(), peer_ids)
         self._refresh_conversations()
-        self.status_tip = f"已建群：{group.name}（{len(group.members)} 名智能体）"
+        self.status_tip = f"已建群：{group.name}（{len(group.members)} 名成员）"
+        self.selection_changed.emit()
 
     def _on_add_member(self) -> None:
-        group = next((g for g in self.channel.groups() if g.id == self._current_target), None)
+        group = next((group for group in self.channel.groups() if group.id == self._current_target), None)
         if not group:
             self.status_tip = "请先选择一个群会话"
             return
@@ -180,13 +206,13 @@ class ChatPanel(QWidget):
         if not peer_ids:
             self.status_tip = "没有可加入的智能体"
             return
-        peer_id, ok = QInputDialog.getItem(self, "拉人", "选择智能体：", peer_ids, 0, False)
+        peer_id, ok = QInputDialog.getItem(self, "拉人", "选择智能体", peer_ids, 0, False)
         if ok and peer_id:
             added = self.channel.add_member(group.id, peer_id)
-            self.status_tip = "已拉入群" if added else "该智能体已在群中"
+            self.status_tip = "已拉入" if added else "该成员已在群中"
             self._refresh_conversations()
+            self.selection_changed.emit()
 
-    # --- 发送 ---
     def _on_send(self) -> None:
         text = self.chat_input.text().strip()
         if not text or not self._current_target:
@@ -195,10 +221,10 @@ class ChatPanel(QWidget):
             self.status_tip = "上一条消息仍在投递，请稍候"
             return
         self.chat_input.clear()
-        msg = Message.create("user", self._current_target, text)
-        self._render_message(msg)  # 立即显示自己发的
+        message = Message.create("user", self._current_target, text)
+        self._render_message(message)
         self.chat_send_btn.setEnabled(False)
-        worker = ChannelWorker(self.channel, msg, self)
+        worker = ChannelWorker(self.channel, message, self)
         worker.message_produced.connect(self._on_produced)
         worker.send_done.connect(lambda _: self._send_finished())
         worker.send_error.connect(self._on_send_error)
@@ -206,7 +232,6 @@ class ChatPanel(QWidget):
         worker.start()
 
     def _on_produced(self, message: Message) -> None:
-        # on_message 回调也会渲染；这里跳过 user 自己那条（已即时显示），避免重复
         if message.sender == "user":
             return
         self._render_message(message)
@@ -214,17 +239,19 @@ class ChatPanel(QWidget):
     def _send_finished(self) -> None:
         self.chat_send_btn.setEnabled(True)
 
-    def _on_send_error(self, err: str) -> None:
-        self.messages.appendPlainText(f"[系统] 发送失败：{err}")
+    def _on_send_error(self, error: str) -> None:
+        self.messages.appendPlainText(f"[系统] 发送失败：{error}")
         self.chat_send_btn.setEnabled(True)
 
-    # --- 渲染 ---
-    def _message_line(self, message: Message) -> str:
-        name = message.meta.get("peer_name", message.sender)
-        return f"[{name}] {message.content}"
-
     def _render_message(self, message: Message) -> None:
-        self.messages.appendPlainText(self._message_line(message) + "\n")
+        own = message.sender == "user"
+        name = "我" if own else message.meta.get("peer_name", message.sender)
+        self.messages.add_message(str(name), message.content, own=own)
+
+    def shutdown(self) -> None:
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.requestInterruption()
+            self.worker.wait(2000)
 
     def status(self) -> str:
         return getattr(self, "status_tip", "")
