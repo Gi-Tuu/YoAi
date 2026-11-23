@@ -5,7 +5,7 @@
   （psOrbit 3.4/5.1/7.3s，第二颗反向）+ 按滚动速度伸缩的尾迹。
 - 可拖动：按住球拖动直接跳转滚动位置。
 - 纸色档给球加一圈细描边，免得亮底上糊成一团。
-- 无开屏动画（用户明确不要）。
+- 无开屏动画（明确决定不做）。
 
 通过 attach(scroll_area) 把滚条绑到一个 QScrollArea/QPlainTextEdit/QListWidget。
 """

@@ -5,7 +5,7 @@
 > 故所有实验按"用量非约束"设计，关键结论均全量 500 题验证）
 > 口径声明：anscheck prompt / yes-no 判定逐字保留官方，**judge 由 gpt-4o 替换为 deepseek**
 > （本机无 OpenAI key），分数不可与官方榜单直接对比。
-> 本轮对原 Core 项目 `E:\Competition\YAI Agent Core` **零改动**，所有改造在 YoAi 内。
+> 本轮对原 Core 项目（只读上游）**零改动**，所有改造在 YoAi 内。
 
 ---
 
@@ -147,8 +147,8 @@ knowledge-update 87%→100%。
 ## 八、复现入口
 
 ```bash
-cd E:/agent/YoAi
-export PYTHONPATH="src;E:/Competition/YAI Agent Core/src;E:/agent/YoAi"
+cd $YOAI_ROOT
+export PYTHONPATH="src;$YAI_CORE_SRC;$YOAI_ROOT"
 
 # ★ 权威口径：单轮递增 + 不截断（生产形态，默认 --max-chars 0）——100题约2小时
 python bench/run_longmemeval_incremental.py --limit 100 --out bench_results/run-authoritative

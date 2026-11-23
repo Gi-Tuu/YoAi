@@ -2,7 +2,7 @@
 
 > 审查日期：2026-11-21　方式：**只读审查**，基于实际仓库代码与已跑测试，不以 README 描述替代代码证据。
 > 本次不改任何源码，只输出审查结论与可执行方案。
-> 代码根：`E:\agent\YoAi`；内核根：`E:\Competition\YAI Agent Core`（YoAi 强依赖它，见 §一.8）。
+> 代码根：`$YOAI_ROOT`；内核根：`$YAI_CORE_SRC`（YoAi 强依赖它，见 §一.8）。
 
 ---
 
@@ -79,7 +79,7 @@
 **原则**：独立适配层，不改 `src/yoai/` 执行逻辑；复用已有 `EvidenceStore` / `ExecutionEvidence` / `BenchmarkLab`；各 Benchmark 保留原始评分口径。
 
 ```
-E:\agent\YoAi\
+$YOAI_ROOT\
   bench/                          # 新增，独立包（不进桌面默认路径）
     __init__.py
     registry.py                   # Benchmark 注册与选择（name→adapter 类）

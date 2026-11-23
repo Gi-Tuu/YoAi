@@ -10,6 +10,8 @@ key 从 .env 读到内存后使用，不回显、不写日志、不进结果。
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,45 @@ from yoai.models.http_base import (
     read_env_file,
 )
 
-DEFAULT_CORE_ENV = Path(r"E:\Competition\YAI Agent Core\.env")
+def _default_core_env() -> Path:
+    """定位 Core 的 .env：环境变量优先，其次按常见相对位置探测。
+
+    - ``YAI_CORE_ENV``：直接指定 .env 文件；
+    - ``YAI_CORE_SRC``：Core 源码根目录，取其中的 .env；
+    - 本仓库父目录下的 ``YAI Agent Core`` / ``yai-agent-core``：取其中的 .env。
+
+    都不存在时返回一个不存在的占位路径，``available()`` 会如实返回 False。
+    """
+    explicit = os.environ.get("YAI_CORE_ENV")
+    if explicit:
+        return Path(explicit).expanduser()
+    core_src = os.environ.get("YAI_CORE_SRC")
+    if core_src:
+        return Path(core_src).expanduser() / ".env"
+
+    # 从 sys.path 里已注入的 Core/src 反推根目录（src 的上一层）
+    for entry in sys.path:
+        if not entry:
+            continue
+        try:
+            path = Path(entry)
+        except OSError:
+            continue
+        if (path / "yai_core").is_dir():
+            candidate = path.parent / ".env"
+            if candidate.exists():
+                return candidate
+
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        for name in ("YAI Agent Core", "yai-agent-core", "yai_agent_core"):
+            candidate = parent / name / ".env"
+            if candidate.exists():
+                return candidate
+    return Path(".env")
+
+
+DEFAULT_CORE_ENV = _default_core_env()
 
 
 class SuanliAdapter(PeerAdapter):

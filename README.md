@@ -4,8 +4,21 @@
 Core 是嵌入式自适应内核（规划 / 工具 / 治理 / 事件流），YoAi 是它之上的**产品层**：
 补上个人上下文、长期目标与跨会话状态，并把二者组装成可独立使用的智能体。
 
-> 当前状态：**Phase 0 起步骨架**（v0.0.1）。最小端到端闭环已跑通，10 项离线测试全绿。
-> 这不是完整产品，详见文末"尚未实现"。
+> **当前状态（2026-11-23）**：可运行的桌面应用 + 长期记忆实验平台。
+> 下表按"能用 / 实验 / 未做"分层，读者不必从正文中自行拼凑成熟度。标"实验"的部分
+> 产品价值尚未证实，不作为能力承诺。
+>
+> | 能力 | 状态 | 依据 |
+> |---|---|---|
+> | 桌面窗口 / 离线演示模型 | 可用 | 无头测试 + 手动交互 |
+> | 真实模型接入（DeepSeek / 算里） | 可用 | HTTP 200 端到端实测 |
+> | 个人事实 / 长期目标 / 会话持久化 | 可用 | 单测覆盖 |
+> | 通讯协作（阶段 A/B/C，含外部智能体分级接入） | 可用 | 离线三智能体 + 真接入分级标注 |
+> | 长期记忆层（temporal_memory） | 实验 | 评测口径与分数见 `docs/FINAL-SUMMARY.md` |
+> | M2 进化引擎 | 实验 | 门控已接通，验证样本 0 条，尚无晋升 |
+> | Event & Scheduler / 真实工具集成 / 弱网适配 | 未做 | 见文末"尚未实现" |
+>
+> 许可证：**PolyForm Noncommercial 1.0.0**（禁止商用，见 `LICENSE`）。
 
 ## 设计边界（与 Core 的职责划分）
 
@@ -39,11 +52,18 @@ output/            本地状态（context.json / goals.json），gitignore
 YoAi 是标准 Qt Widgets 桌面应用：左侧对话区（回车发送），右侧三栏实时显示
 Core 的工具调用链、个人事实与长期目标。离线演示模型可交互，无需 API Key。
 
+先约定两个路径变量（下面所有命令都复用）：
+
 ```bash
-# 启动真实桌面窗口（Core venv 已装 PySide6 6.11.2）
-cd E:/agent/YoAi
-PYTHONPATH="E:/agent/YoAi/src;E:/Competition/YAI Agent Core/src" \
-  "E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" -m yoai.desktop.app
+export YOAI_ROOT=/path/to/YoAi          # 本仓库根目录
+export CORE_ROOT=/path/to/YAI-Agent-Core # YAI Agent Core 源码根目录（只读上游）
+export CORE_PY="$CORE_ROOT/.venv/Scripts/python.exe"  # Windows；Linux/macOS 去掉 .exe 与 Scripts/
+export PYTHONPATH="$YOAI_ROOT/src;$CORE_ROOT/src"     # Linux/macOS 用冒号分隔
+```
+
+```bash
+# 启动真实桌面窗口（Core venv 已装 PySide6）
+"$CORE_PY" -m yoai.desktop.app
 
 # 试试输入：
 #   记住我偏好深色主题
@@ -64,11 +84,11 @@ PYTHONPATH="E:/agent/YoAi/src;E:/Competition/YAI Agent Core/src" \
 双击即开。个人状态保存在 exe 同目录的 `output/`，重启仍在。
 
 ```bash
-# 重新构建（需要 Core venv 里的 PyInstaller 6.22.3）
-"E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" build_exe.py
+# 重新构建（需要 Core venv 里的 PyInstaller）
+"$CORE_PY" build_exe.py
 
 # 无控制台自检（脱离 venv 验证 exe 内部真的跑通）
-QT_QPA_PLATFORM=offscreen "E:/agent/YoAi/dist/YoAi.exe" --self-check
+QT_QPA_PLATFORM=offscreen "$YOAI_ROOT/dist/YoAi.exe" --self-check
 # 结果写入 dist/output/selfcheck.json
 ```
 
@@ -110,7 +130,7 @@ YoAi 内置社交式通讯：多个智能体作为 peer 接入同一个 `Channel
   - `planet_scrollbar.py`：球+3卫星+速度尾迹、可拖动的星球滚条（原生滚条藏掉）。
   - `dark_orb.py`：左下角只露上弧的暗星球 + 浮动卫星入口。
   - `galaxy.py`：恒星=根节点、行星=专家、轨道=血统，点击看详情。
-- **按需不做开屏动画**（用户明确不要）。
+- **按需不做开屏动画**（明确决定不做）。
 
 ## M2 进化引擎（候选生成 + 隔离评测晋升）
 
@@ -207,23 +227,18 @@ agent = YoAiAgent(model=GatewayModelProvider(DeepSeekAnthropicAdapter()))
 
 ## 运行（开发环境 CLI / 测试）
 
-项目未假定有 `uv`；以下用 Core 自带的 Python 解释器 + PYTHONPATH 注入源码路径。
+项目未假定有 `uv`；沿用上面约定的 `YOAI_ROOT` / `CORE_ROOT` / `CORE_PY` / `PYTHONPATH`。
 
 ```bash
 # 跑测试（离线、零 API Key）
-cd E:/agent/YoAi
-PYTHONPATH="E:/agent/YoAi/src;E:/Competition/YAI Agent Core/src" \
-  "E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" -m pytest -q
+"$CORE_PY" -m pytest -q
 
 # 查看本地状态 / 已注册工具
-PYTHONPATH="E:/agent/YoAi/src;E:/Competition/YAI Agent Core/src" \
-  "E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" -m yoai.cli
-PYTHONPATH="E:/agent/YoAi/src;E:/Competition/YAI Agent Core/src" \
-  "E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" -m yoai.cli --tools
+"$CORE_PY" -m yoai.cli
+"$CORE_PY" -m yoai.cli --tools
 
 # 单次任务（默认占位模型，演示事件流）
-PYTHONPATH="E:/agent/YoAi/src;E:/Competition/YAI Agent Core/src" \
-  "E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" -m yoai.cli "你好"
+"$CORE_PY" -m yoai.cli "你好"
 ```
 
 ## 接真实模型
@@ -237,17 +252,25 @@ from yoai import YoAiAgent
 agent = YoAiAgent(model=OpenAICompatProvider())
 ```
 
-## 安全提醒
+## 安全提醒（使用前必读）
 
-起步阶段 `AgentCore` 使用默认 `allow_all` 权限策略（Core 会打印
-`ProductionSafetyWarning`）：工具免审批自动执行。生产 / 多用户环境必须显式配置
-`PermissionPolicy` 或设 `auto_approve_tools=False`，见 Core 的
-`docs/guides/production-permissions.md`。
+**默认 `allow_all`：工具免审批自动执行。** `AgentCore` 起步阶段使用 Core 的默认
+`allow_all` 权限策略，Core 会打印 `ProductionSafetyWarning`。这不是生产配置：
 
-## 尚未实现（Phase 1+）
+- 生产 / 多用户环境必须显式配置 `PermissionPolicy` 或设 `auto_approve_tools=False`，
+  见 Core 的 `docs/guides/production-permissions.md`。
+- **接入外部智能体或处理不可信内容时尤其要收紧**：通讯页可把本机智能体注册为 peer，
+  任一 peer 读到不可信内容后，全放行策略会让注入沿调用链触达工具写操作。这是当前
+  架构最需要警惕的失效模式，不是已修复项。
+- OpenCode Zen 的 key 只从本机 `auth.json` 读入内存，不回显、不写盘；本项目不自带
+  任何凭据。
 
-- Event & Scheduler：事件响应、周期任务、长任务中断恢复（计划书 §3.2）。
-- 真实工具集成：文件、终端、浏览器、桌面（Core 已有 Browser/Desktop Provider，待接入）。
-- Long-Term Memory 高级能力：语义召回、时间版本、冲突解决（复用 Core 的 MemoryVault）。
-- Benchmark：LoCoMo / LongMemEval 的 YoAi 层对照实验与结果归档。
-- 独立安装包与 Web / 桌面交互入口。
+## 尚未实现 / 已知边界
+
+- Event & Scheduler：事件响应、周期任务、长任务中断恢复。
+- 真实工具集成：文件、终端、浏览器、桌面（Core 已有 Provider，YoAi 层待接入）。
+- 弱网 / 低带宽适配、手机自动化：未做。
+- 长期记忆高级能力：语义召回、时间版本、冲突解决。
+- 进化引擎 M3（预算内候选试验）、M4（长期指标）：未实现；当前验证样本 0 条，
+  晋升门控不会在无证据时放行。
+- 评测脚本在 `bench/`，结果归档在 `bench_results/`，不属于桌面默认执行路径。

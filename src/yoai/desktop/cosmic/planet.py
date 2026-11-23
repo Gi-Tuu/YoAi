@@ -4,7 +4,7 @@
 - .planet 用 background-position-x 平移贴图做自转；球面光照/明暗界/大气辉光由 CSS 叠加。
 - 星环按物理遮挡拆成球后/球前两截（.rb-back / .rb-front），不整圈压在球脸上。
 - 生命周期色标：active 朱红发光 / probation 琥珀微光 / candidate 灰暗 / retired 深赭熄灭。
-- 无开屏动画（用户明确不要）。
+- 无开屏动画（明确决定不做）。
 
 对外仍提供 draw_planet(...) 与 PlanetWidget，galaxy.py / 图标脚本沿用。
 """

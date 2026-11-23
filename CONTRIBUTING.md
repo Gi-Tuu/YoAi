@@ -28,7 +28,7 @@
 1. Fork / 分支：`git checkout -b feature/your-change`
 2. 改动前先跑一次基线测试，确认起点是绿的：
    ```bash
-   QT_QPA_PLATFORM=offscreen PYTHONPATH="src;E:/Competition/YAI Agent Core/src" python -m pytest -q
+   QT_QPA_PLATFORM=offscreen PYTHONPATH="src;$YAI_CORE_SRC" python -m pytest -q
    ```
 3. 提交前跑全量测试（当前 **187 passed** 基线），确保不回归。
 4. 提交信息用中文或英文均可，说明"改了什么 + 为什么"。
@@ -41,7 +41,7 @@
 
 - 文档与沟通用**简体中文**；含中文的文件一律 **UTF-8 无 BOM**。
 - 评测代码放在独立的 `bench/`，不进桌面默认执行路径。
-- **原 Core 项目（`E:/Competition/YAI Agent Core`）为只读上游，不得直接修改**；
+- **原 Core 项目（Core 源码根目录，见上文 `$YAI_CORE_SRC`）为只读上游，不得直接修改**；
   需要改 Core 层逻辑时，在 YoAi 内建本地覆盖层或 fork 副本。
 - 不要在源码中硬编码 API key / 凭据；配置从环境变量或 .env 读取。
 

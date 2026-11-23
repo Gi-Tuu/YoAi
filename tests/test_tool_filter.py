@@ -6,7 +6,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(Path(r"E:/Competition/YAI Agent Core") / "src"))
 
 from yoai.agent import YoAiAgent  # noqa: E402
 from yai_core import ScriptedModel, ModelResponse  # noqa: E402

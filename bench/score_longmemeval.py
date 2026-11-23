@@ -27,7 +27,17 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from yoai.models.http_base import read_env_file, post_json  # noqa: E402
 
-CORE_ENV = Path(r"E:\Competition\YAI Agent Core\.env")
+def _core_env():
+    explicit = os.environ.get("YAI_CORE_ENV")
+    if explicit:
+        return Path(explicit).expanduser()
+    src = os.environ.get("YAI_CORE_SRC")
+    if src:
+        return Path(src).expanduser() / ".env"
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
+CORE_ENV = _core_env()
 JUDGE_MODEL = "deepseek/deepseek-v4.1-flash-1017"
 
 

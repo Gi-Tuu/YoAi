@@ -11,6 +11,8 @@ LongMemEval 是纯记忆 QA，不需要工具；传工具会让 deepseek 偶发�
 
 from __future__ import annotations
 
+import os
+
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -20,7 +22,17 @@ from yai_core.types import ModelResponse, TokenUsage
 
 from yoai.models.http_base import read_env_file, post_json
 
-CORE_ENV = Path(r"E:\Competition\YAI Agent Core\.env")
+def _core_env():
+    explicit = os.environ.get("YAI_CORE_ENV")
+    if explicit:
+        return Path(explicit).expanduser()
+    src = os.environ.get("YAI_CORE_SRC")
+    if src:
+        return Path(src).expanduser() / ".env"
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
+CORE_ENV = _core_env()
 MODEL = "deepseek/deepseek-v4.1-flash-1017"
 
 

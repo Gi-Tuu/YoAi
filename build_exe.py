@@ -1,7 +1,7 @@
 """构建 YoAi.exe（单文件桌面应用）。
 
 用法（Core venv 已装 PyInstaller 6.22.3）：
-    "E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" build_exe.py
+    "$CORE_PY" build_exe.py   # CORE_PY = Core venv 里的 Python 解释器
 
 产物：dist/YoAi.exe —— 双击即可运行，无需 Python、无需 Core venv。
 个人状态保存在 exe 同目录的 output/，跨启动持久。

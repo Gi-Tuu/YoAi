@@ -61,7 +61,7 @@ def main() -> int:
     import os
     exe = ROOT / "dist" / "YoAi.exe"
     ico = ROOT / "dist" / "yoai-planet.ico"
-    desktop = Path(os.environ.get("USERPROFILE", r"C:\Users\sheng")) / "Desktop"
+    desktop = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
     force = "--force" in sys.argv
     if not exe.exists():
         print(f"EXE 不存在：{exe}")

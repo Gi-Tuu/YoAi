@@ -56,9 +56,9 @@
 ## 复现
 
 ```bash
-cd E:/agent/YoAi
-PYTHONPATH="src;E:/Competition/YAI Agent Core/src" \
-  "E:/Competition/YAI Agent Core/.venv/Scripts/python.exe" -c "
+cd $YOAI_ROOT
+PYTHONPATH="src;$YAI_CORE_SRC" \
+  "$CORE_PY" -c "
 from yoai.models import SuanliAdapter
 a = SuanliAdapter(); print(a.available())
 r = a.send('只回复四个字：测试收到'); print(r.ok, r.text, r.meta['usage'])

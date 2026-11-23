@@ -94,8 +94,8 @@ multi-session 仍是 35%——它需要的是跨会话关联能力（见下方�
 ## 复现命令
 
 ```bash
-cd E:/agent/YoAi
-export PYTHONPATH="src;E:/Competition/YAI Agent Core/src;E:/agent/YoAi"   # Windows 用分号设 PYTHONPATH
+cd $YOAI_ROOT
+export PYTHONPATH="src;$YAI_CORE_SRC;$YOAI_ROOT"   # Windows 用分号分隔
 python bench/run_longmemeval.py --limit 500 --seed 20261121 --out bench_results/lme-oracle-full500-v2
 python bench/score_longmemeval.py --hyp bench_results/lme-oracle-full500-v2/hypotheses.jsonl \
     --out bench_results/lme-oracle-full500-v2

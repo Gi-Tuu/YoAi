@@ -25,7 +25,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(Path(r"E:\Competition\YAI Agent Core") / "src"))
+# Core 源码根目录：环境变量优先，否则从 PYTHONPATH 已注入的路径复用
+if not any((Path(p) / "yai_core").is_dir() for p in sys.path if p):
+    import os
+    _core = os.environ.get("YAI_CORE_SRC")
+    if _core and (Path(_core) / "src" / "yai_core").is_dir():
+        sys.path.insert(0, str(Path(_core) / "src"))
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "bench"))
 

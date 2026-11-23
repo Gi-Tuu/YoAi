@@ -4,11 +4,37 @@
 产出单文件 YoAi.exe。把 yoai 与 yai_core 两个源码树都纳入 pathex，
 PySide6 由 PyInstaller 官方 hook 自动收集平台插件。
 """
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH)  # noqa: F821 - PyInstaller 注入
-CORE_SRC = Path(r"E:\Competition\YAI Agent Core\src")
+
+
+def _find_core_src() -> Path:
+    """定位 Core 源码：YAI_CORE_SRC 优先，其次从 sys.path 反推，再按相邻目录探测。"""
+    env = os.environ.get("YAI_CORE_SRC")
+    if env:
+        candidate = Path(env).expanduser() / "src"
+        if (candidate / "yai_core").is_dir():
+            return candidate
+    for entry in sys.path:
+        if entry:
+            try:
+                path = Path(entry)
+                if (path / "yai_core").is_dir():
+                    return path
+            except OSError:
+                continue
+    for parent in ROOT.parents:
+        for name in ("YAI Agent Core", "yai-agent-core", "yai_agent_core"):
+            candidate = parent / name / "src"
+            if (candidate / "yai_core").is_dir():
+                return candidate
+    raise RuntimeError("找不到 YAI Agent Core 源码，请设置环境变量 YAI_CORE_SRC=<Core 根目录>")
+
+
+CORE_SRC = _find_core_src()
 YOAI_SRC = ROOT / "src"
 
 block_cipher = None
