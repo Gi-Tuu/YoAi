@@ -117,30 +117,44 @@ class YoAiAgent:
             core_kwargs["router"] = YoAiRouter()
         self.core = AgentCore(model, **core_kwargs)
         # Core 内省公开方法 → ToolSpec，注册进统一 ToolRegistry。
-        self._all_tool_specs = discover(self.capabilities)
+        self._all_tool_specs = self._build_all_specs(builtin_tools, workspace_root, readonly_roots)
+        self.core.register_tools(self._all_tool_specs)
+        # 插件热加载（2026-11-24）：data_dir/plugins/*.py 每轮 astream 前扫描，
+        # 新增/变更的插件工具 diff 注册——旧会话不重启也能用上新工具。
+        # 无 plugins 目录时零开销（不扫描）。
+        self._plugin_dir: Path | None = (
+            Path(data_dir) / "plugins" if data_dir is not None else None
+        )
+        self._plugin_mtimes: dict[str, float | None] = {}   # stem → 上次加载的 mtime
+        self._plugin_tool_names: dict[str, str] = {}        # 工具名 → 来源插件 stem
+        self.tool_filter = tool_filter
+        self._active_whitelist: set[str] | None = None
+
+    def _build_all_specs(
+        self,
+        builtin_tools: bool = False,
+        workspace_root: str | Path | None = None,
+        readonly_roots: list[str | Path] | None = None,
+    ) -> list[Any]:
+        """构造基础工具表（capabilities + 实操 + meta），__init__ 与 refresh 共用。"""
+        specs = discover(self.capabilities)
         # 实操工具（文件/联网）：Core 公开 API 注册，内核零改动、升级兼容。
         # 默认关闭，验证后再决定是否设默认。
         if builtin_tools:
             from yoai.tools_builtin import builtin_tool_specs, readonly_tool_specs
-            self._all_tool_specs = self._all_tool_specs + builtin_tool_specs(
-                workspace_root
-            )
+            specs = specs + builtin_tool_specs(workspace_root)
             # 只读挂载扩展目录（如宿主项目源码，供 AI 调试宿主自己）：
             # 仅 file_ro_list / file_ro_read，路径必须落在白名单根内，无写类操作。
             if readonly_roots:
-                self._all_tool_specs = self._all_tool_specs + readonly_tool_specs(
-                    readonly_roots
-                )
+                specs = specs + readonly_tool_specs(readonly_roots)
         # meta 工具（常驻，2026-11-24 YoAi 自检反馈）：
         # - list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
         # - request_capability：Core 现成实现，模型发现缺工具时显式声明能力缺口，
         #   内核拦截处理（handler 由 loop 接管，不会真的执行 _unreachable）。
-        self._all_tool_specs.append(self._build_list_tools_spec())
+        specs.append(self._build_list_tools_spec())
         from yai_core.tools.meta import build_request_capability_tool
-        self._all_tool_specs.append(build_request_capability_tool())
-        self.core.register_tools(self._all_tool_specs)
-        self.tool_filter = tool_filter
-        self._active_whitelist: set[str] | None = None
+        specs.append(build_request_capability_tool())
+        return specs
 
     def _build_list_tools_spec(self) -> Any:
         """构造 list_tools 工具：运行时读 _all_tool_specs，如实反映当前工具表。"""
@@ -184,6 +198,76 @@ class YoAiAgent:
     def list_tools(self) -> list[str]:
         """列出当前已注册的工具名。"""
         return [t["name"] for t in self.core.list_tools()]
+
+    # --- 工具热加载（2026-11-24）：旧会话不重启也能用上新工具 ---
+
+    def _scan_plugins(self) -> list[Any]:
+        """扫描插件目录，加载新增/变更的插件工具（mtime 去重）。
+
+        插件约定：data_dir/plugins/*.py，导出 ``TOOLS``（ToolSpec 列表）
+        或 ``build_tools() -> list[ToolSpec]``。坏插件跳过不反噬主任务，
+        并记住失败时的 mtime（文件没再改就不反复重试）。
+        """
+        import importlib.util
+
+        if self._plugin_dir is None or not self._plugin_dir.is_dir():
+            return []
+        specs: list[Any] = []
+        for path in sorted(self._plugin_dir.glob("*.py")):
+            stem = path.stem
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if self._plugin_mtimes.get(stem) == mtime:
+                continue   # 未变化，跳过
+            try:
+                mod_name = f"yoai_plugin_{stem}_{int(mtime)}"
+                spec_md = importlib.util.spec_from_file_location(mod_name, path)
+                assert spec_md is not None and spec_md.loader is not None
+                mod = importlib.util.module_from_spec(spec_md)
+                spec_md.loader.exec_module(mod)
+                tools = getattr(mod, "TOOLS", None)
+                if tools is None and hasattr(mod, "build_tools"):
+                    tools = mod.build_tools()
+                if not isinstance(tools, list):
+                    raise TypeError("插件需导出 TOOLS 列表或 build_tools() 返回列表")
+                specs.extend(tools)
+                self._plugin_mtimes[stem] = mtime   # 成功才记录；失败记 None 防重试
+            except Exception:  # noqa: BLE001
+                self._plugin_mtimes[stem] = None
+        return specs
+
+    def refresh_tools(self) -> list[str]:
+        """重建工具表并注册新增项（diff 只补缺），返回本次新注册的工具名。
+
+        - 插件目录有新/变更文件 → 加载并注册（同名插件工具可热替换）；
+        - 插件工具与内置工具重名 → 跳过（不许插件覆盖内核/实操工具）；
+        - registry 缺了 _all_tool_specs 里已有的工具（如被过滤器清过）→ 补回。
+        """
+        added: list[str] = []
+        reg = self.core.registry
+        for spec in self._scan_plugins():
+            name = spec.name
+            owner = self._plugin_tool_names.get(name)
+            if owner is None and reg.has(name):
+                continue   # 与非插件工具重名：跳过，禁止插件覆盖内置工具
+            # 同步 _all_tool_specs（list_tools 工具与 tool_filter 重建都以它为准）
+            self._all_tool_specs = [
+                s for s in self._all_tool_specs if s.name != name
+            ] + [spec]
+            if reg.has(name):
+                reg._tools.pop(name)   # 插件工具热替换：先删旧再走正常注册（含校验）
+            else:
+                added.append(name)
+            reg.register(spec)
+            self._plugin_tool_names[name] = owner or "plugin"
+        # registry 缺失补回（例如 tool_filter 白名单外清掉、但白名单现已放开）
+        missing = [s for s in self._all_tool_specs if not reg.has(s.name)]
+        if missing:
+            reg.register_many(missing)
+            added.extend(s.name for s in missing if s.name not in added)
+        return added
 
     # --- 写入可观测（阶段A）：透传记忆层统计，不改写入行为 ---
     def reset_write_stats(self) -> None:
@@ -230,6 +314,10 @@ class YoAiAgent:
     async def astream(self, task: str):
         """驱动 Core 执行任务，逐条透出内核事件（不改动事件语义）。"""
         self.reset_write_stats()   # 旁路：本轮写入统计清零
+        try:
+            self.refresh_tools()   # 插件热加载（无 plugins 目录时零开销）
+        except Exception:  # noqa: BLE001
+            pass                   # 热加载失败不反噬主任务
         self._apply_tool_filter(task)
         final_text = ""
         async for event in self.core.astream(task):
