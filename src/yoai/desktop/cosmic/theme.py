@@ -140,6 +140,7 @@ def qss(p: Palette) -> str:
     return f"""
     QMainWindow, QWidget#cosmicRoot {{ background: {p.paper}; color: {p.ink}; }}
     QWidget {{ background: transparent; color: {p.ink}; font-family: {ui}; }}
+    QMessageBox#toolApproval {{ background-color: {p.paper2}; color: {p.ink}; }}
     QLabel {{ color: {p.ink}; }}
     QFrame#rule {{ background: {p.rule}; border: none; }}
 
@@ -192,6 +193,8 @@ def qss(p: Palette) -> str:
     QPushButton#inkSend:focus {{ border-color: {p.brick}; }}
     QPushButton#inkSend:disabled {{ background: transparent; }}
 
+    QFrame#detailPopup {{ background: {p.paper2}; border: 1px solid {p.rule}; }}
+    QPushButton#detailTile {{ padding: 0; min-height: 0; font-size: 9pt; }}
     QFrame#inspector {{ background: {p.paper2}; border-left: 1px solid {p.rule}; }}
     QLabel#inspectorTitle {{ font-size: 12pt; font-weight: 600; }}
     QFrame#inspectorSection {{ background: transparent; border: none; }}

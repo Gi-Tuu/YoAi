@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSplitter,
-    QStackedWidget,
     QStatusBar,
     QTabWidget,
     QVBoxLayout,
@@ -131,7 +130,12 @@ class MainWindow(QMainWindow):
         self.tabs.setObjectName("contentStack")
 
         chat_tab = QWidget()
-        chat_layout = QVBoxLayout(chat_tab)
+        chat_row = QHBoxLayout(chat_tab)
+        chat_row.setContentsMargins(0, 0, 8, 0)
+        chat_row.setSpacing(0)
+        chat_layout = QVBoxLayout()
+        chat_row.addLayout(chat_layout, 1)
+        chat_row.addWidget(self._build_detail_tiles())
         chat_layout.setContentsMargins(20, 18, 20, 16)
         chat_layout.setSpacing(12)
 
@@ -240,6 +244,47 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.inspector_toggle_btn)
         content_layout.addWidget(header)
 
+    def _build_detail_tiles(self) -> QWidget:
+        rail = QWidget()
+        column = QVBoxLayout(rail)
+        column.setContentsMargins(0, 18, 0, 0)
+        column.setSpacing(8)
+        self.trace = QListWidget()
+        self.trace_card = SectionCard("执行过程", self.trace, "发送任务后，这里会显示可读的执行步骤。")
+        self.facts = QListWidget()
+        self.facts_card = SectionCard("个人事实", self.facts, "还没有个人事实。")
+        self.goals = QListWidget()
+        self.goals_card = SectionCard("长期目标", self.goals, "还没有长期目标。")
+        self.memory_summary = MemoryWriteSummary(self.palette)
+
+        self.detail_tiles = []
+        for title, card in (("执行过程", self.trace_card), ("个人事实", self.facts_card),
+                            ("长期目标", self.goals_card), ("本轮记忆", self.memory_summary)):
+            tile = QPushButton(title[:2] + "\n" + title[2:])
+            tile.setAccessibleName(title)
+            tile.setToolTip(title)
+            tile.setObjectName("detailTile")
+            tile.setFixedSize(46, 46)
+            column.addWidget(tile)
+            popup = QFrame(tile, Qt.WindowType.Popup)
+            popup.setObjectName("detailPopup")
+            popup.setFixedSize(330, 112 if card is self.memory_summary else 258)
+            layout = QVBoxLayout(popup)
+            layout.setContentsMargins(12, 12, 12, 12)
+            layout.addWidget(card)
+            tile.clicked.connect(lambda checked=False, b=tile, p=popup: self._open_detail(b, p))
+            self.detail_tiles.append((tile, popup))
+        column.addStretch(1)
+        return rail
+
+    def _open_detail(self, tile, popup) -> None:
+        origin = tile.mapToGlobal(QPoint(0, 0))
+        screen = tile.screen().availableGeometry()
+        popup.move(max(screen.left(), origin.x() - popup.width() - 6),
+                   max(screen.top(), min(origin.y(), screen.bottom() - popup.height() + 1)))
+        popup.show()
+        popup.setFocus()
+
     def _build_inspector(self) -> QWidget:
         inspector = QFrame()
         inspector.setObjectName("inspector")
@@ -248,7 +293,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(14)
 
         head = QHBoxLayout()
-        self.inspector_title = QLabel("本轮检查器")
+        self.inspector_title = QLabel("会话检查器")
         self.inspector_title.setObjectName("inspectorTitle")
         head.addWidget(self.inspector_title)
         head.addStretch(1)
@@ -257,25 +302,6 @@ class MainWindow(QMainWindow):
         self.collapse_inspector_btn.clicked.connect(lambda: self._set_inspector_visible(False))
         head.addWidget(self.collapse_inspector_btn)
         layout.addLayout(head)
-
-        self.inspector_stack = QStackedWidget()
-        main_page = QWidget()
-        main_layout = QVBoxLayout(main_page)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(16)
-
-        self.trace = QListWidget()
-        self.trace_card = SectionCard("执行过程", self.trace, "发送任务后，这里会显示可读的执行步骤。")
-        main_layout.addWidget(self.trace_card, 3)
-        self.facts = QListWidget()
-        self.facts_card = SectionCard("个人事实", self.facts, "还没有个人事实。")
-        main_layout.addWidget(self.facts_card, 2)
-        self.goals = QListWidget()
-        self.goals_card = SectionCard("长期目标", self.goals, "还没有长期目标。")
-        main_layout.addWidget(self.goals_card, 2)
-        self.memory_summary = MemoryWriteSummary(self.palette)
-        main_layout.addWidget(self.memory_summary)
-        self.inspector_stack.addWidget(main_page)
 
         communication_page = QWidget()
         communication_layout = QVBoxLayout(communication_page)
@@ -288,8 +314,7 @@ class MainWindow(QMainWindow):
         communication_layout.addWidget(self.comm_members_value[0])
         communication_layout.addWidget(self.comm_external_value[0])
         communication_layout.addStretch(1)
-        self.inspector_stack.addWidget(communication_page)
-        layout.addWidget(self.inspector_stack, 1)
+        layout.addWidget(communication_page, 1)
         return inspector
 
     @staticmethod
@@ -320,19 +345,13 @@ class MainWindow(QMainWindow):
         if widget is self.chat_panel:
             key = "communication"
             title = "通讯"
-            self.inspector_title.setText("会话检查器")
-            self.inspector_stack.setCurrentIndex(1)
             self._update_communication_inspector()
         elif widget is self.galaxy:
             key = "galaxy"
             title = "星球系"
-            self.inspector_title.setText("本轮检查器")
-            self.inspector_stack.setCurrentIndex(0)
         else:
             key = "chat"
             title = "我的对话"
-            self.inspector_title.setText("本轮检查器")
-            self.inspector_stack.setCurrentIndex(0)
         self.nav.set_active(key)
         self.page_title.setText(title)
         if self.session_manager is not None:
@@ -341,16 +360,13 @@ class MainWindow(QMainWindow):
             self.new_session_btn.setVisible(key == "chat")
         if self.galaxy is not None:
             self.galaxy.starfield.set_active(widget is self.galaxy)
-        if widget is self.galaxy:
-            self._set_inspector_visible(False)
-        elif self.width() >= 1100 or self.inspector.isVisible():
-            self._set_inspector_visible(True)
+        self._set_inspector_visible(key == "communication" and self.width() >= 1100)
 
     def _set_inspector_visible(self, visible: bool) -> None:
-        if self.tabs.currentWidget() is self.galaxy:
-            visible = False
+        communication = self.chat_panel is not None and self.tabs.currentWidget() is self.chat_panel
+        visible = visible and communication
         self.inspector.setVisible(visible)
-        self.inspector_toggle_btn.setVisible(not visible and self.tabs.currentWidget() is not self.galaxy)
+        self.inspector_toggle_btn.setVisible(not visible and communication)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -542,6 +558,7 @@ class MainWindow(QMainWindow):
             import pprint
             detail = pprint.pformat(shown, width=60, sort_dicts=False)
         except Exception:  # noqa: BLE001
+            shown = None
             detail = shown_json
         limit = detail if len(detail) <= 900 else detail[:900] + "\n…（已截断）"
         reason = shown.get("reason", "") if isinstance(shown, dict) else ""
@@ -550,11 +567,20 @@ class MainWindow(QMainWindow):
         if prompt or reason:
             text += f"理由：{prompt or reason}\n\n"
         text += f"参数/上下文：\n{limit}\n\n确认执行吗？"
-        answer = QMessageBox.question(
-            self, "工具执行确认", text,
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,   # 默认拒绝（失败关闭）
-        )
-        approved = answer == QMessageBox.Yes
+        dialog = QMessageBox(self)
+        dialog.setOption(QMessageBox.Option.DontUseNativeDialog)
+        dialog.setObjectName("toolApproval")
+        dialog.setWindowTitle("工具执行确认")
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(text)
+        dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        dialog.button(QMessageBox.Yes).setText("允许执行")
+        dialog.button(QMessageBox.No).setText("拒绝")
+        dialog.setDefaultButton(QMessageBox.No)
+        dialog.setEscapeButton(QMessageBox.No)
+        approved = dialog.exec() == QMessageBox.Yes
+        dialog.deleteLater()
         from yoai.desktop.approval import set_future
         loop.call_soon_threadsafe(set_future, future, approved)
         self._append_trace(f"审批：{tool} → {'同意' if approved else '拒绝'}",

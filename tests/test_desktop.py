@@ -82,21 +82,26 @@ def test_worker_signal_drives_real_loop(app, tmp_path):
     win.close()
 
 
-def test_paper_shell_and_collapsible_inspector(app, tmp_path):
+def test_chat_detail_tiles_preserve_chat_width(app, tmp_path):
     agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
     win = MainWindow(agent)
     win.show()
     assert win.palette.name == "light"
     assert win.nav.buttons["chat"].isChecked()
-    assert win.inspector.isVisible()
-    win._set_inspector_visible(False)
-    assert not win.inspector.isVisible()
-    assert win.inspector_toggle_btn.isVisible()
-    win._set_inspector_visible(True)
-    win.resize(980, 640)
-    app.processEvents()
-    assert not win.inspector.isVisible()
-    assert win.inspector_toggle_btn.isVisible()
+    for width in (1180, 980):
+        win.resize(width, 640)
+        app.processEvents()
+        assert not win.inspector.isVisible()
+        assert not win.inspector_toggle_btn.isVisible()
+        before = win.chat.width()
+        assert len(win.detail_tiles) == 4
+        for tile, popup in win.detail_tiles:
+            assert tile.isVisible()
+            tile.click()
+            app.processEvents()
+            assert popup.isVisible()
+            assert win.chat.width() == before
+            popup.close()
     win.close()
 
 
@@ -109,7 +114,7 @@ def test_communication_uses_context_inspector(app, tmp_path):
     win.tabs.setCurrentIndex(1)
     assert win.inspector_title.text() == "会话检查器"
     assert win.nav.buttons["communication"].isChecked()
-    assert win.inspector_stack.currentIndex() == 1
+    assert not win.inspector.isHidden()
     win.close()
 
 

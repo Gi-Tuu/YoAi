@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF, QTextCursor
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -336,9 +336,7 @@ class SendButton(QPushButton):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self._ink)
         if self._timer.isActive():
-            phase = math.tau * (self._clock.elapsed() % 1600) / 1600
-            painter.rotate(math.degrees(phase))
-            painter.drawPath(self._brush_ring(phase))
+            self._paint_wet_ink(painter, self._clock.elapsed())
         else:
             side = 15
             height = side * math.sqrt(3) / 2
@@ -349,21 +347,30 @@ class SendButton(QPushButton):
             ]))
 
     @staticmethod
-    def _brush_ring(phase: float) -> QPainterPath:
-        outer, inner = [], []
-        for step in range(65):
-            progress = step / 64
-            angle = 0.30 + progress * (math.tau - 0.49)
-            radius = 9 + 0.45 * math.sin(3 * angle) + 0.42 * math.sin(2 * angle - phase)
-            taper = min(1.0, progress / 0.10, (1 - progress) / 0.18)
-            width = (2.45 + 0.72 * math.sin(angle + 0.6) + 0.34 * math.sin(8 * angle)) * taper
-            x, y = math.cos(angle), math.sin(angle)
-            outer.append(QPointF((radius + width / 2) * x, (radius + width / 2) * y))
-            inner.append(QPointF((radius - width / 2) * x, (radius - width / 2) * y))
-        path = QPainterPath()
-        path.addPolygon(QPolygonF(outer + inner[::-1]))
-        path.closeSubpath()
-        return path
+    def _brush_tip(ms: int) -> tuple[QPointF, float]:
+        seconds = ms / 1000
+        angle = 4.05 * seconds + 0.18 * math.sin(3.3 * seconds) - math.pi / 2
+        radius = 9.2 + 0.65 * math.sin(2 * angle + 0.8 * seconds)
+        point = QPointF(radius * math.cos(angle), radius * math.sin(angle))
+        pressure = 1.22 + 0.38 * math.sin(angle + 0.7 * seconds) + 0.16 * math.cos(3 * angle)
+        return point, pressure
+
+    def _paint_wet_ink(self, painter: QPainter, now: int) -> None:
+        # Anchor each ink impression to its birth time. Only its opacity ages.
+        lifetime = 1330
+        interval = 12
+        start = max(0, now - lifetime)
+        first = ((start + interval - 1) // interval) * interval
+        color = QColor(self._ink)
+        for born in range(first, now, interval):
+            point, pressure = self._brush_tip(born)
+            freshness = 1 - (now - born) / lifetime
+            color.setAlphaF(0.48 * freshness ** 1.8)
+            painter.setBrush(color)
+            painter.drawEllipse(point, pressure, pressure * 0.90)
+        tip, pressure = self._brush_tip(now)
+        painter.setBrush(self._ink)
+        painter.drawEllipse(tip, pressure, pressure * 0.90)
 
 
 class SectionCard(QFrame):
