@@ -34,13 +34,18 @@ def test_multiple_tool_results_merged_into_one_user_message():
 
 
 def test_tool_results_followed_by_user_message():
+    """Core 官方实现把相邻 user 块合并（符合 Anthropic 严格交替要求）。"""
     out = conv([
         _assistant_two_calls(),
         {"role": "tool", "content": "A", "tool_call_id": "call_A"},
         {"role": "tool", "content": "B", "tool_call_id": "call_B"},
         {"role": "user", "content": "追问"},
     ])
-    assert out[2]["content"] == "追问"   # result 刷出后 user 正常跟上
+    assert len(out) == 2
+    assert out[1]["role"] == "user"
+    types = [b.get("type") for b in out[1]["content"]]
+    assert types == ["tool_result", "tool_result", "text"]
+    assert out[1]["content"][-1].get("text") == "追问"
 
 
 def test_single_tool_result_still_works():

@@ -126,71 +126,20 @@ def _pull_system(messages: list[dict[str, Any]] | None) -> str:
 
 
 def _openai_messages_to_anthropic(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """OpenAI 线格式 → Anthropic messages（system 移走；tool 结果变 user 块）。
+    """OpenAI 线格式 → Anthropic messages。
 
-    Anthropic 硬约束：assistant 一条消息里的多个 tool_use，其 tool_result 必须
-    在**紧接着的一条** user 消息里全部给出（各自一个 tool_result block）。
-    Core 则是一条 assistant(tool_calls×N) + N 条独立 tool 消息——必须合并，
-    否则网关 400：「tool_use ids were found without tool_result blocks immediately
-    after」（2026-11-24 真实生产复现）。
+    直接委托 Core 官方实现 `yai_core.llm.anthropic.to_anthropic_messages`——
+    它已正确处理两条硬约束：工具结果挂 user 消息、相邻同角色合并
+    （一次多工具调用的多个 tool_result 必须合成一条 user，否则网关 400）。
+
+    2026-11-24 曾在此自写转换（漏了合并→生产 400），发现 Core 早有正确实现后改为委托，
+    避免重复造轮子、跟随 Core 维护。
     """
-    out: list[dict[str, Any]] = []
-    pending_tool_results: list[dict[str, Any]] = []
-
-    def flush_tool_results() -> None:
-        if pending_tool_results:
-            out.append({"role": "user", "content": list(pending_tool_results)})
-            pending_tool_results.clear()
-
-    for m in messages:
-        role = m.get("role", "")
-        if role == "system":
-            continue
-        if role == "tool":
-            # 连续 tool 消息合并进同一条 user；遇到非 tool 消息时由下方 flush
-            pending_tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": m.get("tool_call_id", ""),
-                "content": str(m.get("content", "")),
-            })
-            continue
-        # 非 tool 消息到来：先把攒着的 tool_result 刷出去，保持"紧跟"语义
-        flush_tool_results()
-        if role == "assistant" and m.get("tool_calls"):
-            blocks: list[dict[str, Any]] = []
-            content = m.get("content", "")
-            if isinstance(content, str) and content:
-                blocks.append({"type": "text", "text": content})
-            for call in m["tool_calls"]:
-                if not isinstance(call, dict):
-                    continue
-                fn = call.get("function", {})
-                args = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
-                if isinstance(args, str):
-                    import json
-                    try:
-                        args = json.loads(args)
-                    except (ValueError, TypeError):
-                        args = {}
-                blocks.append({
-                    "type": "tool_use",
-                    "id": call.get("id", ""),
-                    "name": fn.get("name", "") if isinstance(fn, dict) else "",
-                    "input": args if isinstance(args, dict) else {},
-                })
-            out.append({"role": "assistant", "content": blocks})
-            continue
-        # user / 普通 assistant：content 数组降级为文本
-        content = m.get("content", "")
-        if isinstance(content, list):
-            content = " ".join(
-                str(p.get("text", "")) for p in content
-                if isinstance(p, dict) and p.get("type") == "text"
-            )
-        out.append({"role": role if role in ("user", "assistant") else "user",
-                    "content": content if isinstance(content, str) else ""})
-    flush_tool_results()   # 末尾连续 tool 消息也要收尾
-    return out
+    from yai_core.llm.anthropic import to_anthropic_messages
+    # Core 实现：system 消息会被转成 _content_blocks 而不是丢掉——
+    # 但 Anthropic 要求 system 走顶层字段，由 send() 的 _pull_system 处理，这里过滤掉。
+    without_system = [m for m in messages if m.get("role") != "system"]
+    return to_anthropic_messages(without_system)
 
 
 def _openai_tool_to_anthropic(tool: dict[str, Any]) -> dict[str, Any]:
