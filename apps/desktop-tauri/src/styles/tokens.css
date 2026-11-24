@@ -1,0 +1,28 @@
+/* 设计令牌：颜色 / 间距 / 字体 / 圆角 / 动画参数统一，支持后续主题扩展。 */
+:root {
+  --bg: #12151a;
+  --surface: #1a1f26;
+  --surface-2: #222831;
+  --ink: #e8ecf1;
+  --dim: #a4adba;
+  --weak: #6f7885;
+  --accent: #d9705a;
+  --accent-soft: rgba(217, 112, 90, 0.14);
+  --ok: #6fbf8f;
+  --bad: #d9705a;
+  --rule: #2b323c;
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
+  --radius: 10px; --radius-sm: 6px;
+  --font: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "Cascadia Code", Consolas, "SF Mono", monospace;
+  --fast: 120ms; --normal: 220ms;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --surface-2: #eeefea;
+    --ink: #242522; --dim: #5a6058; --weak: #8a9089;
+    --rule: #dcdcd5; --accent-soft: rgba(165, 59, 43, 0.08);
+  }
+}
