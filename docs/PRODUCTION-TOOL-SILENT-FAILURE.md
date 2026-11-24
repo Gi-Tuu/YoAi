@@ -68,11 +68,28 @@
 
 提交 `175d1b1`。
 
-## 遗留/后续
+## 后续两项已实施（2026-11-24，用户要求先 ② 后 ①）
 
-- **工具缺失问题**：YoAi capabilities 只有 12 个记忆/目标工具，没有读写文件/联网工具。
-  根因是 `discover(self.capabilities)` 只从 host 方法发现工具。待办：在 YoAi capabilities
-  加 `read_file` / `write_file` / `web_search` 等（改动全在 YoAi，Core 升级兼容），
-  并按安全约定做权限分级（内部读大胆、写/外部操作谨慎）。
-- **error 事件在桌面 UI 不可见**：本次虽然修了触发原因，但"工具层失败静默"的显示问题
-  仍在——建议后续在桌面 worker / UI 把 `EventType.ERROR` 显示出来，避免同类问题再隐蔽。
+### ② error 事件在桌面 UI 不可见 → 已修（`5d4616b`）
+
+- `_on_event` 的 error / permission_denied / budget_exceeded 现在**在主对话区显示** `⚠️ 具体原因`
+  （此前只躺在 trace 的 tooltip 里）
+- 新增 `_task_had_error` 标志：Core 可能"报错后仍发 done"，此时状态标**部分失败**而非"已完成"，
+  避免 agent 把"查询失败"答成"你没提过"
+- 新增 2 个 UI 测试；全量 203 passed
+
+### ① 实操工具缺失 → 已修（`d125715`）
+
+- 新增 `src/yoai/tools_builtin.py`：用 **Core 现成电池** `filesystem_capabilities` +
+  `filesystem_gate` + `build_spec`（公开 API 注入，**内核零改动、升级兼容**）：
+  - `file_list` / `file_read` / `file_create` / `file_patch`
+  - 根目录：项目内 workspace/；**读全根目录、写限白名单子目录**（默认 notes/）
+  - 写工具挂 gate：越界写被拒（实测 "outside.txt 不在允许的写作用域 ['notes/'] 内"）
+  - 大小上限 / 符号链接防护用 Core 保守默认值
+- 联网：`web_search`（freeserp.ai 无 key）+ `web_fetch`（仅 https、超时、长度限制）
+- 路由扩展 `_FILE_OP` 补上 Core 规则表漏掉的"写一个文件/读一下"等意图，避免再次 DIRECT 静默失败
+- 桌面端默认开（`YOAI_BUILTIN_TOOLS=0` 可关），CLI 默认关
+- **端到端验证**：真实模型（讯飞）写文件→读回，零错误、文件真实落盘；208 passed
+
+> 安全边界按你的选择：workspace/ 为根、写限白名单子目录、联网一起加。
+> 工具能力是"内部大胆、外部谨慎"——写有 gate、联网只读、失败如实返回错误文本。
