@@ -166,7 +166,7 @@ def qss(p: Palette) -> str:
     QLabel#fieldLabel {{ color: {p.weak}; font-size: 9.5pt; }}
     QLabel#modelChip {{
         background: {p.nav}; color: {p.dim}; border: 1px solid {p.rule};
-        border-radius: 6px; padding: 5px 10px; font-size: 9.5pt;
+        border-radius: 5px; padding: 2px 7px; font-size: 9pt;
     }}
     QLabel#taskState {{ color: {p.weak}; font-size: 9.5pt; padding: 4px 8px; }}
     QLabel#taskState[state="running"] {{ color: {p.brick}; background: {p.accent_soft}; border-radius: 6px; }}
@@ -181,9 +181,16 @@ def qss(p: Palette) -> str:
     QFrame#composerSurface {{ background: {p.paper2}; border: 1px solid {p.rule}; border-radius: 10px; }}
     QPlainTextEdit#composer {{
         background: transparent; color: {p.ink}; border: none;
-        padding: 10px 12px; font-size: 11pt;
+        padding: 5px 10px; font-size: 11pt;
     }}
-    QLabel#composerHint {{ color: {p.weak}; font-size: 8.5pt; padding: 0 12px 8px 12px; }}
+    QPushButton#inkSend {{
+        background: transparent; border: 1px solid transparent;
+        border-radius: 7px; padding: 0; min-height: 0;
+    }}
+    QPushButton#inkSend:hover {{ background: {p.nav}; }}
+    QPushButton#inkSend:pressed {{ background: {p.accent_soft}; }}
+    QPushButton#inkSend:focus {{ border-color: {p.brick}; }}
+    QPushButton#inkSend:disabled {{ background: transparent; }}
 
     QFrame#inspector {{ background: {p.paper2}; border-left: 1px solid {p.rule}; }}
     QLabel#inspectorTitle {{ font-size: 12pt; font-weight: 600; }}

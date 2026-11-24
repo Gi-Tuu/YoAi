@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from yoai.agent import YoAiAgent
 from yoai.desktop.chat_panel import ChatPanel
 from yoai.desktop.cosmic.theme import Palette
-from yoai.desktop.widgets import ChatView, Composer, MemoryWriteSummary, NavRail, SectionCard
+from yoai.desktop.widgets import ChatView, Composer, MemoryWriteSummary, NavRail, SectionCard, SendButton
 from yoai.desktop.worker import AgentWorker
 
 
@@ -146,24 +146,22 @@ class MainWindow(QMainWindow):
         composer_surface = QFrame()
         composer_surface.setObjectName("composerSurface")
         composer_layout = QVBoxLayout(composer_surface)
-        composer_layout.setContentsMargins(0, 0, 0, 0)
+        composer_layout.setContentsMargins(1, 1, 8, 5)
         composer_layout.setSpacing(0)
-        input_row = QHBoxLayout()
-        input_row.setContentsMargins(0, 0, 0, 0)
-        input_row.setSpacing(10)
         self.input = Composer("输入任务…")
         self.input.returnPressed.connect(self._on_send)
-        self.send_btn = QPushButton("发送")
-        self.send_btn.setObjectName("primary")
-        self.send_btn.setMinimumHeight(48)
-        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        composer_layout.addWidget(self.input)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(10, 0, 0, 0)
+        self.model_chip = QLabel("模型 · 离线演示")
+        self.model_chip.setObjectName("modelChip")
+        controls.addWidget(self.model_chip)
+        controls.addStretch(1)
+        self.send_btn = SendButton(self.palette)
         self.send_btn.clicked.connect(self._on_send)
-        input_row.addWidget(self.input, 1)
-        input_row.addWidget(self.send_btn, alignment=Qt.AlignmentFlag.AlignBottom)
-        composer_layout.addLayout(input_row)
-        composer_hint = QLabel("Enter 发送 · Shift+Enter 换行 · 工具细节在右侧检查器")
-        composer_hint.setObjectName("composerHint")
-        composer_layout.addWidget(composer_hint)
+        controls.addWidget(self.send_btn)
+        composer_layout.addLayout(controls)
         chat_layout.addWidget(composer_surface)
         self.tabs.addTab(chat_tab, "我的对话")
 
@@ -233,9 +231,6 @@ class MainWindow(QMainWindow):
             layout.addWidget(self.new_session_btn)
 
         layout.addStretch(1)
-        self.model_chip = QLabel("模型 · 离线演示")
-        self.model_chip.setObjectName("modelChip")
-        layout.addWidget(self.model_chip)
         self.task_state_label = QLabel("就绪")
         self.task_state_label.setObjectName("taskState")
         layout.addWidget(self.task_state_label)
@@ -373,6 +368,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(_cosmic_qss(self.palette))
         self.nav.set_palette(self.palette)
         self.chat.set_palette(self.palette)
+        self.send_btn.set_palette(self.palette)
         self.memory_summary.set_palette(self.palette)
         if self.chat_panel is not None:
             self.chat_panel.set_palette(self.palette)
@@ -484,8 +480,7 @@ class MainWindow(QMainWindow):
         self._task_had_error = False   # 新一轮清零
         self.trace.clear()
         self.trace_card.set_count(0)
-        self.send_btn.setEnabled(False)
-        self.send_btn.setText("执行中")
+        self.send_btn.set_busy(True)
         self.memory_summary.set_running(True)
         self._set_task_state("执行中", "running")
         self.statusBar().showMessage("任务执行中…")
@@ -568,8 +563,7 @@ class MainWindow(QMainWindow):
     def _on_done(self, final_text: str) -> None:
         cleaned = self._clean_final_text(final_text) or "（任务完成，但没有返回最终文本）"
         self._append_chat("YoAi", cleaned)
-        self.send_btn.setEnabled(True)
-        self.send_btn.setText("发送")
+        self.send_btn.set_busy(False)
         self._refresh_sidebar()
         self._refresh_memory_summary()
         if self.session_manager is not None:
@@ -587,8 +581,7 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, message: str) -> None:
         self._append_chat("YoAi", f"任务失败：{message}")
-        self.send_btn.setEnabled(True)
-        self.send_btn.setText("发送")
+        self.send_btn.set_busy(False)
         self.memory_summary.set_running(False)
         self._set_task_state("失败", "error")
         self.statusBar().showMessage("任务失败，可修改输入后重试")

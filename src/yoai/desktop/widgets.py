@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import html
+import math
 from dataclasses import dataclass
 from datetime import datetime
 
-from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QTextCursor
+from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -282,8 +283,7 @@ class Composer(QPlainTextEdit):
         self.setObjectName("composer")
         self.setPlaceholderText(placeholder)
         self.setTabChangesFocus(True)
-        self.setMinimumHeight(56)
-        self.setMaximumHeight(120)
+        self.setFixedHeight(52)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
@@ -298,6 +298,72 @@ class Composer(QPlainTextEdit):
 
     def setText(self, text: str) -> None:  # noqa: N802
         self.setPlainText(text)
+
+
+class SendButton(QPushButton):
+    def __init__(self, palette: Palette) -> None:
+        super().__init__()
+        self.setObjectName("inkSend")
+        self.setFixedSize(36, 36)
+        self.set_palette(palette)
+        self._clock = QElapsedTimer()
+        self._timer = QTimer(self, interval=16)
+        self._timer.timeout.connect(self.update)
+        self.set_busy(False)
+
+    def set_palette(self, palette: Palette) -> None:
+        self._ink = QColor(palette.ink)
+        self.update()
+
+    def set_busy(self, busy: bool) -> None:
+        self.setEnabled(not busy)
+        label = "思考中" if busy else "发送"
+        self.setAccessibleName(label)
+        self.setToolTip(label)
+        self.setCursor(Qt.CursorShape.ArrowCursor if busy else Qt.CursorShape.PointingHandCursor)
+        if busy:
+            self._clock.start()
+            self._timer.start()
+        else:
+            self._timer.stop()
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._ink)
+        if self._timer.isActive():
+            phase = math.tau * (self._clock.elapsed() % 1600) / 1600
+            painter.rotate(math.degrees(phase))
+            painter.drawPath(self._brush_ring(phase))
+        else:
+            side = 15
+            height = side * math.sqrt(3) / 2
+            painter.drawPolygon(QPolygonF([
+                QPointF(-height / 3, -side / 2),
+                QPointF(2 * height / 3, 0),
+                QPointF(-height / 3, side / 2),
+            ]))
+
+    @staticmethod
+    def _brush_ring(phase: float) -> QPainterPath:
+        outer, inner = [], []
+        for step in range(65):
+            progress = step / 64
+            angle = 0.30 + progress * (math.tau - 0.49)
+            radius = 9 + 0.45 * math.sin(3 * angle) + 0.42 * math.sin(2 * angle - phase)
+            taper = min(1.0, progress / 0.10, (1 - progress) / 0.18)
+            width = (2.45 + 0.72 * math.sin(angle + 0.6) + 0.34 * math.sin(8 * angle)) * taper
+            x, y = math.cos(angle), math.sin(angle)
+            outer.append(QPointF((radius + width / 2) * x, (radius + width / 2) * y))
+            inner.append(QPointF((radius - width / 2) * x, (radius - width / 2) * y))
+        path = QPainterPath()
+        path.addPolygon(QPolygonF(outer + inner[::-1]))
+        path.closeSubpath()
+        return path
 
 
 class SectionCard(QFrame):
