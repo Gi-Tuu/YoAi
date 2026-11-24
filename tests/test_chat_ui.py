@@ -84,3 +84,31 @@ def test_chat_panel_send_via_worker(app, tmp_path):
     assert "[小策]" in text       # 收到 p1 的回复
     assert channel.store.count() >= 2
     win.close()
+
+
+def test_error_event_is_visible_in_chat_and_marks_failure(app, tmp_path):
+    """静默失败修复：error 事件必须显示在对话区，done 后不能标'已完成'。"""
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path / "main")
+    channel = build_demo_channel(tmp_path / "chat")
+    win = MainWindow(agent, channel=channel)
+
+    win._task_had_error = False
+    win._on_event("error", {"stage": "model_protocol", "error": "工具调用文本无法识别"})
+    assert win._task_had_error is True
+    # 对话区必须出现错误提示（ChatView 是 QTextBrowser，用 toPlainText 断言）
+    shown = win.chat.toPlainText()
+    assert "工具调用文本无法识别" in shown, shown
+
+    win._on_done("模型说没找到记忆")
+    assert "部分失败" in win.task_state_label.text()
+    win.close()
+
+
+def test_clean_done_without_error(app, tmp_path):
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path / "main2")
+    channel = build_demo_channel(tmp_path / "chat2")
+    win = MainWindow(agent, channel=channel)
+    win._task_had_error = False
+    win._on_done("正常回答")
+    assert "已完成" in win.task_state_label.text()
+    win.close()

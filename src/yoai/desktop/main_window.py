@@ -77,6 +77,10 @@ class MainWindow(QMainWindow):
         self.evidence_store = evidence_store
         self.evolution_archive = evolution_archive
         self.worker: AgentWorker | None = None
+        # 本轮是否出现过内核错误事件（error/permission_denied/budget_exceeded）。
+        # Core 允许"报错后仍发 done"，若在 done 里无脑标"已完成"会掩盖失败——
+        # 用户看到的是"你没提过"而非"查询根本没成功"（2026-11-24 静默失败根因之一）。
+        self._task_had_error = False
         self._inspector_auto_hidden = False
 
         self.palette = Palette.light()
@@ -473,6 +477,7 @@ class MainWindow(QMainWindow):
             return
         self.input.clear()
         self._append_chat("我", text)
+        self._task_had_error = False   # 新一轮清零
         self.trace.clear()
         self.trace_card.set_count(0)
         self.send_btn.setEnabled(False)
@@ -520,7 +525,12 @@ class MainWindow(QMainWindow):
         elif event_type == "done":
             self._append_trace(label, kind="ok")
         elif event_type in ("error", "permission_denied", "budget_exceeded"):
+            # 静默失败修复：错误不能只躺在 trace 的 tooltip 里——
+            # 主对话区必须可见，并标记本轮失败，避免 agent 把失败当"没有记忆"回答。
+            self._task_had_error = True
+            reason = data.get("error") or data.get("reason") or data.get("message") or str(data)
             self._append_trace(label, kind="bad", detail=str(data))
+            self._append_chat("YoAi", f"⚠️ {label}：{reason}")
         else:
             self._append_trace(label)
 
@@ -535,8 +545,14 @@ class MainWindow(QMainWindow):
             self.session_manager.touch(delta=2)
         if self.galaxy is not None:
             self.galaxy.refresh()
-        self._set_task_state("已完成", "done")
-        self.statusBar().showMessage("任务完成")
+        if self._task_had_error:
+            # Core 可能"报错后仍完成"——此时上方的回答可能基于失败的工具调用，
+            # 状态必须标失败，不能让用户误以为查询成功但"库里没有"。
+            self._set_task_state("部分失败", "error")
+            self.statusBar().showMessage("本轮出现过执行错误，请核对上方回答")
+        else:
+            self._set_task_state("已完成", "done")
+            self.statusBar().showMessage("任务完成")
 
     def _on_error(self, message: str) -> None:
         self._append_chat("YoAi", f"任务失败：{message}")
