@@ -7,7 +7,6 @@
 | 9 | **Core 更新：thinking/signature 块回传** | **待转发** | 把 `docs/CORE-UPDATE-REQUEST.md` 转给 Core 负责人；这是唯一真需要 Core 改的项（ModelResponse.raw 有原始块但 loop 构造 assistant 消息时丢弃） | 你（转发） |
 | 10 | Anthropic thinking 坑的本地绕法 | 未做 | 在 Core 修好前，评估换不带 thinking 的 `ANTHROPIC_MODEL`（治标）或 `ModelResponse.raw` 侧回注；见 ANTHROPIC-TOOL-RESULT-400.md | — |
 | 3 | 进化机制重启 | 暂停 | 解决"工具白名单限制反降分"根因 | — |
-| 5 | 云端其它文档上云 | 部分完成 | 今天已同步 README/两份台账/根因文档/需求清单；剩余：给出其它需上云的节点清单 | — |
 | 6 | UI 美化 | 后置 | — | — |
 | 7 | README 对外版 | 后置 | 已更新到当前状态（228 测试/18 工具/权限 3 档），但仍偏内部视角，面向开源访客重写 | — |
 | 8 | judge 换官方 gpt-4o | 未做 | 需 OpenAI key；唯一无法靠免费额度解决的项 | — |
