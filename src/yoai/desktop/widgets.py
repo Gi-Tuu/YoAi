@@ -316,7 +316,7 @@ class ChatView(QTextBrowser):
             rows.append(
                 f'<div style="margin:3px 0; color:{color}; font-size:9.5pt; line-height:150%;">'
                 f'<span style="color:{palette.weak};">[{_esc(label)}]</span> '
-                f'{md_to_html(text, link_color=palette.brick)}</div>'
+                f'{md_to_html(text, link_color=palette.brick, inline=True)}</div>'
             )
         # 思考段：默认折叠只留入口，点击才展开（碎片已累积成一段连续文本）
         think_html = ""

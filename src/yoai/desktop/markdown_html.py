@@ -49,8 +49,12 @@ def _inline(text: str, *, link_color: str) -> str:
 _CODE_BG = "rgba(127,127,127,0.12)"
 
 
-def md_to_html(text: str, *, link_color: str = "#a53b2b") -> str:
-    """Markdown 文本 → HTML 片段。支持代码块/标题/列表/水平线/粗斜体/行内码/链接。"""
+def md_to_html(text: str, *, link_color: str = "#a53b2b",
+               inline: bool = False) -> str:
+    """Markdown 文本 → HTML 片段。支持代码块/标题/列表/水平线/粗斜体/行内码/链接。
+
+    inline=True：普通段落用 span（不换行），用于「[标签] 内容」需要同行的场景。
+    """
     # 先整体转义（引号也转）——后续所有分支处理的都是安全文本，
     # 模型输出里的 <script> / onerror= 等绝无可能变成真实标签。
     raw = html.escape(str(text or ""), quote=True)
@@ -63,7 +67,10 @@ def md_to_html(text: str, *, link_color: str = "#a53b2b") -> str:
         if not buf:
             return
         body = "<br>".join(_inline(line, link_color=link_color) for line in buf)
-        parts.append(f'<p style="margin:0 0 8px 0;">{body}</p>')
+        if inline:
+            parts.append(f'<span>{body}</span>')
+        else:
+            parts.append(f'<p style="margin:0 0 8px 0;">{body}</p>')
         buf.clear()
 
     paragraph: list[str] = []

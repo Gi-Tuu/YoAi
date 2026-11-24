@@ -241,3 +241,16 @@ def test_thinking_fragments_merge_into_one_block(app, tmp_path):
     win.chat.collapse_process(idx)
     assert "37 条记录" not in win.chat.toHtml()
     win.close()
+
+
+def test_process_row_label_and_text_on_same_line(app, tmp_path):
+    """[步骤] 标签必须与内容同一行——inline 模式不产生块级 <p>。"""
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+    idx = win.chat.begin_process("YoAi")
+    win.chat.add_process_line(idx, "路由: react", "step")
+    html = win.chat.toHtml()
+    assert "[步骤]" in html and "react" in html
+    # Qt 规范化后仍应无块级分段夹在标签与内容之间
+    assert "<p " not in html.split("[步骤]")[1].split("react")[0]
+    win.close()

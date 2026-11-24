@@ -84,3 +84,11 @@ def test_table_with_alignment_and_no_outer_pipes():
 
 # Qt 集成测试放在 test_desktop.py（共用 module-scope QApplication fixture）：
 # 独立创建 QApplication 会与后续 worker 测试的资源清理竞态，导致全量崩溃。
+
+
+def test_inline_mode_uses_span_not_block_p():
+    """inline=True 时段落必须是 span（可跟在 [步骤] 标签后同行显示）。"""
+    out = md_to_html("路由: react", inline=True)
+    assert "<span>路由: react</span>" in out
+    assert "<p " not in out
+    assert md_to_html("路由: react").find("<p ") == 0   # 默认仍是块级
