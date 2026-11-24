@@ -23,6 +23,7 @@
 | **工具热加载(2026-11-24)** | 旧会话不重启也能用上新工具：refresh_tools() diff 补缺 + `data_dir/plugins/*.py` 插件每轮 astream 前按 mtime 热加载（坏插件跳过、不许覆盖内置工具、删除类照走审批）；桌面端插件目录 `output/sessions/shared/plugins/`；8 项新测试，全量 **257 passed** | TOOL-HOTLOAD.md |
 | **终端/浏览器(2026-11-24)** | `shell_run` 受限终端（无 shell 解释/cwd 限 workspace/超时/截断/剔除凭据环境变量/**不进 auto 白名单走审批**）+ `open_url` 系统浏览器（仅 http/https，auto 档）；内置 QWebEngine 面板未做（UI 编辑中+exe 增重）；9 项测试，全量 **266 passed** | TERMINAL-AND-BROWSER.md |
 | **Markdown渲染(2026-11-24)** | 根因=消息整体转义后直接塞 HTML、少了"转义后解析 md"；新增 markdown_html.py（先 escape 再解析，代码块/标题/列表/链接白名单，纯标准库）；assistant/peer 消息渲染、用户输入仍纯文本；10 项测试，全量 **276 passed** | MARKDOWN-RENDERING.md |
+| **过程/thinking可见(2026-11-24)** | 正文过程块：运行时展开 thinking+工序，DONE 后折叠成摘要（可点击回看）；thinking 由 YoAi 包装层拦截 raw_content_blocks 成自定义事件（**内核零改动**，跟随上游）；表格语法补齐；全量 **281 passed** | PROCESS-AND-THINKING-UI.md |
 | 进程/单实例 | QLocalSocket单实例守卫(进程死OS自动释放，无陈旧锁)；worker的requestInterruption真cancel asyncio任务，根治关窗后YoAi.exe残留 | src/yoai/desktop/single_instance.py |
 | 权限3档 | 桌面用Core的AllowlistPolicy(auto档)：只读+记忆/目标内部写白名单自动过，文件写弹窗确认(默认拒绝/关窗一律拒绝)；Core默认CollectChannel.confirm永远True已替换；YOAI_PERMISSION_MODE=allow_all可切全放行(默认auto) | src/yoai/desktop/approval.py |
 | 500题全量 | **已完成**（2026-11-23，免费额度最后一天） | — |

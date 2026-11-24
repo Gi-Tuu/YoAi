@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import math
+import time
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -38,6 +39,12 @@ class _Msg:
     who: str
     text: str
     time: str
+    # 执行过程 / thinking：运行时逐条追加、展开显示；DONE 后折叠成摘要行。
+    # 每项 (kind, text)：kind ∈ {"think", "step", "result", "bad"}。
+    process: list[tuple[str, str]] | None = None
+    process_collapsed: bool = False
+    started: float = 0.0      # time.monotonic() 起跑时刻，用于摘要"耗时 Xs"
+    finished: float = 0.0
 
 
 def _esc(text: str) -> str:
@@ -137,7 +144,47 @@ class ChatView(QTextBrowser):
         self.setReadOnly(True)
         self.palette_ = palette
         self._messages: list[_Msg] = []
+        self.anchorClicked.connect(self._on_anchor)
         self._render()
+
+    def _on_anchor(self, url) -> None:
+        """过程块的「展开/折叠」锚点：切换当前轮 process_collapsed 并重渲染。"""
+        link = url.toString() if hasattr(url, "toString") else str(url)
+        if not link.startswith("yoai:process:"):
+            return
+        try:
+            index = int(link.rsplit(":", 1)[-1])
+            msg = self._messages[index]
+        except (ValueError, IndexError):
+            return
+        msg.process_collapsed = not msg.process_collapsed
+        self._render()
+
+    def begin_process(self, who: str = "YoAi", *, render: bool = True) -> int:
+        """新开一条带过程块的助手消息（本轮执行起点）。返回消息索引。"""
+        idx = len(self._messages)
+        self._messages.append(_Msg(who, "", datetime.now().strftime("%H:%M"),
+                                   process=[], started=time.monotonic()))
+        if render:
+            self._render()
+        return idx
+
+    def add_process_line(self, index: int, text: str, kind: str = "step",
+                         *, render: bool = True) -> None:
+        """运行时逐条追加工序/thinking 到指定过程块（同步加载）。"""
+        if 0 <= index < len(self._messages) and self._messages[index].process is not None:
+            self._messages[index].process.append((kind, str(text)))
+            if render:
+                self._render()
+
+    def collapse_process(self, index: int, *, render: bool = True) -> None:
+        """最终结果返回后折叠过程块，只留摘要行（可点击展开回看）。"""
+        if 0 <= index < len(self._messages) and self._messages[index].process is not None:
+            msg = self._messages[index]
+            msg.process_collapsed = True
+            msg.finished = time.monotonic()
+            if render:
+                self._render()
 
     def add_message(self, who: str, text: str, *, time: str | None = None, render: bool = True) -> None:
         self._messages.append(_Msg(who, str(text), time or datetime.now().strftime("%H:%M")))
@@ -193,13 +240,55 @@ class ChatView(QTextBrowser):
             '</td></tr></table>'
         )
 
+    def _process_html(self, message: _Msg, palette: Palette, index: int) -> str:
+        """过程块：运行时展开逐条显示 thinking/工序；完成后折叠为摘要行。"""
+        lines = message.process or []
+        kinds = {"think": "思考", "step": "步骤", "result": "结果", "bad": "错误"}
+        counts: dict[str, int] = {}
+        for kind, _ in lines:
+            counts[kind] = counts.get(kind, 0) + 1
+        tools = counts.get("step", 0)
+        elapsed = message.finished - message.started if message.finished else 0
+        summary = (f"执行过程 · {len(lines)} 条记录"
+                   + (f" · {tools} 步" if tools else "")
+                   + (f" · 耗时 {elapsed:.1f}s" if elapsed else ""))
+        toggle = f"yoai:process:{index}"
+        link_style = f"color:{palette.brick}; text-decoration:none; cursor:pointer;"
+        if message.process_collapsed:
+            return (
+                f'<div style="margin:0 0 8px 0; padding:5px 9px; background:{palette.nav}; '
+                f'border:1px solid {palette.rule}; font-size:9.5pt;">'
+                f'<a href="{toggle}" style="{link_style}">▸ {_esc(summary)}（点击展开）</a></div>'
+            )
+        rows = []
+        for kind, text in lines:
+            color = palette.vermilion if kind == "bad" else (
+                palette.dim if kind in ("think", "result") else palette.ink)
+            label = kinds.get(kind, kind)
+            rows.append(
+                f'<div style="margin:3px 0; color:{color}; font-size:9.5pt; line-height:150%;">'
+                f'<span style="color:{palette.weak};">[{_esc(label)}]</span> '
+                f'{md_to_html(text, link_color=palette.brick)}</div>'
+            )
+        toggle_label = "▾ 收起过程"
+        return (
+            f'<div style="margin:0 0 10px 0; padding:7px 10px; background:{palette.nav}; '
+            f'border:1px solid {palette.rule};">'
+            f'<a href="{toggle}" style="{link_style}">{toggle_label}</a>'
+            + "".join(rows) + '</div>'
+        )
+
     def _agent_html(self, message: _Msg, palette: Palette) -> str:
+        index = next((i for i, m in enumerate(self._messages) if m is message), 0)
+        process = (self._process_html(message, palette, index)
+                   if message.process is not None else "")
+        body = md_to_html(message.text, link_color=palette.brick) if message.text else ""
         return (
             '<table width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 20px 0;">'
             '<tr><td width="4%"></td><td width="84%">'
             + self._meta(message.who, message.time, palette.brick, palette, "left")
-            + f'<div style="color:{palette.ink}; line-height:160%;">'
-            + md_to_html(message.text, link_color=palette.brick) + '</div>'
+            + process
+            + f'<div style="color:{palette.ink}; line-height:160%;">' + body + '</div>'
             '</td><td width="12%"></td></tr></table>'
         )
 

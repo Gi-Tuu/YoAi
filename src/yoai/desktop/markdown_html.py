@@ -114,6 +114,46 @@ def md_to_html(text: str, *, link_color: str = "#a53b2b") -> str:
             i += 1
             continue
 
+        # 表格：当前行含 | 且下一行是分隔行（|---|:---:|）→ 整段表格
+        # 注意必须在水平线判断之后：单独的 --- 仍是 hr，不是表格分隔。
+        if "|" in line and i + 1 < len(lines) and re.fullmatch(
+            r"\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*", lines[i + 1]
+        ):
+            _flush_paragraph(paragraph)
+
+            def _cells(row: str) -> list[str]:
+                s = row.strip()
+                if s.startswith("|"):
+                    s = s[1:]
+                if s.endswith("|"):
+                    s = s[:-1]
+                return [c.strip() for c in s.split("|")]
+
+            header = _cells(line)
+            i += 2   # 跳过表头 + 分隔行
+            body: list[list[str]] = []
+            while i < len(lines) and "|" in lines[i] and lines[i].strip():
+                body.append(_cells(lines[i]))
+                i += 1
+            th = "".join(
+                f'<th style="border:1px solid rgba(127,127,127,0.3); padding:5px 9px; '
+                f'text-align:left; background:{_CODE_BG}; font-weight:600;">'
+                f'{_inline(c, link_color=link_color)}</th>' for c in header
+            )
+            trs = "".join(
+                "<tr>" + "".join(
+                    f'<td style="border:1px solid rgba(127,127,127,0.3); padding:5px 9px;">'
+                    f'{_inline(c, link_color=link_color)}</td>' for c in row
+                ) + "</tr>"
+                for row in body
+            )
+            parts.append(
+                f'<table cellspacing="0" cellpadding="0" '
+                f'style="border-collapse:collapse; margin:0 0 10px 0; font-size:10.5pt;">'
+                f'<thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table>'
+            )
+            continue
+
         # 列表（连续同类型行合成一个 ul/ol）
         lm = re.match(r"^\s*([-*+]|\d+[.)])\s+(.*)$", line)
         if lm:

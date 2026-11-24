@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
         # Core 允许"报错后仍发 done"，若在 done 里无脑标"已完成"会掩盖失败——
         # 用户看到的是"你没提过"而非"查询根本没成功"（2026-11-24 静默失败根因之一）。
         self._task_had_error = False
+        self._process_index: int | None = None   # 当前轮正文过程块索引
         self._inspector_auto_hidden = False
 
         self.palette = Palette.light()
@@ -493,6 +494,8 @@ class MainWindow(QMainWindow):
             return
         self.input.clear()
         self._append_chat("我", text)
+        # 本轮过程块：运行时在正文展开显示 thinking/工序，DONE 后折叠留摘要
+        self._process_index = self.chat.begin_process("YoAi")
         self._task_had_error = False   # 新一轮清零
         self.trace.clear()
         self.trace_card.set_count(0)
@@ -526,17 +529,35 @@ class MainWindow(QMainWindow):
         self.worker = worker
         worker.start()
 
+    def _add_process(self, text: str, kind: str = "step") -> None:
+        """把一条过程信息同步写进正文过程块（运行时展开可见）。"""
+        idx = getattr(self, "_process_index", None)
+        if idx is not None:
+            self.chat.add_process_line(idx, text, kind)
+
     def _on_event(self, event_type: str, data: dict[str, Any]) -> None:
         if event_type in ("tier_changed", "model_message"):
             return
         label = EVENT_LABELS.get(event_type, event_type)
+        if event_type == "thinking":
+            # YoAi 侧拦截：Core 把 thinking 存进历史但不发事件（见 agent.astream）
+            text = str(data.get("text", "")).strip()
+            if text:
+                self._add_process(text, "think")
+            return
         if event_type == "strategy_selected":
             strategy = data.get("strategy", "")
             self._append_trace(f"{label}：{strategy}")
+            self._add_process(f"{label}：{strategy}")
         elif event_type == "tool_call":
-            self._append_trace(f"{label}：{data.get('tool', '')}", detail=str(data.get("arguments", "")))
+            tool = str(data.get("tool", ""))
+            self._append_trace(f"{label}：{tool}", detail=str(data.get("arguments", "")))
+            self._add_process(f"调用 {tool}　{str(data.get('arguments', ''))[:300]}")
         elif event_type == "tool_result":
-            self._append_trace(f"{label}：{data.get('tool', '')}", kind="dim", detail=str(data.get("result", "")))
+            tool = str(data.get("tool", ""))
+            result = str(data.get("result", ""))
+            self._append_trace(f"{label}：{tool}", kind="dim", detail=result)
+            self._add_process(f"{tool} 返回：{result[:300]}", "result")
         elif event_type == "done":
             self._append_trace(label, kind="ok")
         elif event_type in ("error", "permission_denied", "budget_exceeded"):
@@ -545,9 +566,11 @@ class MainWindow(QMainWindow):
             self._task_had_error = True
             reason = data.get("error") or data.get("reason") or data.get("message") or str(data)
             self._append_trace(label, kind="bad", detail=str(data))
+            self._add_process(f"⚠️ {label}：{reason}", "bad")
             self._append_chat("YoAi", f"⚠️ {label}：{reason}")
         else:
             self._append_trace(label)
+            self._add_process(label)
 
     def _on_approval_requested(self, tool: str, shown_json: str, loop, future) -> None:
         """主线程弹窗：用户确认/拒绝 Core 的写操作审批请求。"""
@@ -588,7 +611,14 @@ class MainWindow(QMainWindow):
 
     def _on_done(self, final_text: str) -> None:
         cleaned = self._clean_final_text(final_text) or "（任务完成，但没有返回最终文本）"
-        self._append_chat("YoAi", cleaned)
+        idx = getattr(self, "_process_index", None)
+        if idx is not None:
+            # 最终结果写进本轮过程块的正文，过程折叠只留摘要行
+            self.chat._messages[idx].text = cleaned
+            self.chat.collapse_process(idx)
+            self._process_index = None
+        else:
+            self._append_chat("YoAi", cleaned)
         self.send_btn.set_busy(False)
         self._refresh_sidebar()
         self._refresh_memory_summary()
@@ -606,7 +636,13 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("任务完成")
 
     def _on_error(self, message: str) -> None:
-        self._append_chat("YoAi", f"任务失败：{message}")
+        idx = getattr(self, "_process_index", None)
+        if idx is not None:
+            self.chat._messages[idx].text = f"任务失败：{message}"
+            self.chat.collapse_process(idx)
+            self._process_index = None
+        else:
+            self._append_chat("YoAi", f"任务失败：{message}")
         self.send_btn.set_busy(False)
         self.memory_summary.set_running(False)
         self._set_task_state("失败", "error")

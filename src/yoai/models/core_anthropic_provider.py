@@ -70,6 +70,10 @@ class CoreAnthropicModelProvider:
         self.last_status = ""
         # 真实 token 用量累计（对齐 GatewayModelProvider.total_usage 的宿主约定）
         self.total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        # thinking 事件 outbox（2026-11-24）：Core 把 thinking 块存进历史但**不发事件**，
+        # UI 拿不到。这里在包装层拦截、暂存文本，由 YoAiAgent.astream drain 成事件。
+        # 不改 Core 源码，跟随上游更新无忧。
+        self.thinking_outbox: list[str] = []
 
     def accumulate_usage(self, usage: TokenUsage | None) -> None:
         if usage is None:
@@ -93,6 +97,7 @@ class CoreAnthropicModelProvider:
             return ModelResponse(content=f"[模型网关错误] {exc}")
         self.last_status = "ok"
         self.accumulate_usage(response.usage)
+        self._capture_thinking(response)
 
         if response.tool_calls or not tools or not is_stall_text(response.content or ""):
             return response
@@ -109,9 +114,29 @@ class CoreAnthropicModelProvider:
         except Exception:  # noqa: BLE001 - 重试失败 → 返回原响应，不无限纠缠
             return response
         self.accumulate_usage(retried.usage)
+        self._capture_thinking(retried)
         if not retried.tool_calls and is_stall_text(retried.content or ""):
             return response
         return retried
+
+    def _capture_thinking(self, response: ModelResponse) -> None:
+        """从 Core 原生块里提取 thinking 文本到 outbox（不动 raw_content_blocks，
+        回传仍由 Core 负责；signature 块无文本，不展示）。"""
+        blocks = getattr(response, "raw_content_blocks", None) or []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") not in ("thinking", "redacted_thinking"):
+                continue
+            text = str(block.get("thinking") or block.get("text") or "").strip()
+            if text:
+                self.thinking_outbox.append(text)
+
+    def drain_thinking(self) -> list[str]:
+        """取走并清空本轮攒下的 thinking 文本（YoAiAgent 每轮事件循环调用）。"""
+        items = list(self.thinking_outbox)
+        self.thinking_outbox.clear()
+        return items
 
     def describe(self) -> dict[str, Any]:
         return {

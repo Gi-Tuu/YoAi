@@ -57,6 +57,48 @@ def test_event_rendering_updates_trace_and_chat(app, tmp_path):
     win.close()
 
 
+def test_markdown_and_process_block_render(app, tmp_path):
+    """Markdown 渲染 + 过程块（thinking/工序运行时展开、DONE 后折叠）。"""
+    from yoai.desktop.markdown_html import md_to_html
+
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+
+    win.chat.add_message("YoAi", "**已记住**深色主题")
+    html = win.chat.toHtml()
+    assert "font-weight:600" in html and "已记住" in html
+    assert "**已记住**" not in html
+
+    win.chat.add_message("我", "**这不是markdown**")
+    assert "**这不是markdown**" in win.chat.toHtml()
+
+    idx = win.chat.begin_process("YoAi")
+    win.chat.add_process_line(idx, "正在核对偏好", "think")
+    win.chat.add_process_line(idx, "调用 remember_fact", "step")
+    assert "正在核对偏好" in win.chat.toHtml()   # 运行时展开可见
+    win.chat._messages[idx].text = "已记住深色主题"
+    win.chat.collapse_process(idx)
+    collapsed = win.chat.toHtml()
+    assert "点击展开" in collapsed and "2 条记录" in collapsed
+    assert "正在核对偏好" not in collapsed      # 折叠后过程隐藏
+    win.close()
+
+
+def test_process_block_wired_to_events(app, tmp_path):
+    """thinking 事件写进正文过程块；done 后自动折叠。"""
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+    win._process_index = win.chat.begin_process("YoAi")
+    win._on_event("thinking", {"text": "用户问的是主题偏好"})
+    win._on_event("tool_call", {"tool": "recall_fact", "arguments": {}})
+    assert "用户问的是主题偏好" in win.chat.toHtml()
+    win._on_done('| 键 | 值 |\n|---|---|\n| 主题偏好 | 深色主题 |')
+    html = win.chat.toHtml()
+    assert "点击展开" in html and "主题偏好" in html
+    assert "<table" in html   # 表格语法渲染
+    win.close()
+
+
 def test_worker_signal_drives_real_loop(app, tmp_path):
     from PySide6.QtCore import QEventLoop, QTimer
 

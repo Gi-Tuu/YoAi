@@ -68,43 +68,19 @@ def test_horizontal_rule():
     assert "<hr" in md_to_html("上\n\n---\n\n下")
 
 
-# --- Qt 集成：真把消息塞进视图，确认 HTML 生效 ---
-
-def _qapp():
-    from PySide6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([])
-
-
-def test_chatview_renders_agent_markdown():
-    from yoai.desktop.cosmic.theme import Palette
-    from yoai.desktop.widgets import ChatView
-
-    app = _qapp()
-    view = ChatView(Palette.light())
-    view.add_message("YoAi", "**已记住**深色主题")
-    html = view.toHtml()
-    # QTextBrowser 把 <strong> 规范化成 span style="font-weight:600"，按实际输出断言
-    assert "font-weight:600" in html and "已记住" in html
-    assert "**已记住**" not in html
+def test_table_rendered():
+    """截图里的表格：`|键|值|` + `|---|---|` 原样显示 → 必须渲染成 HTML table。"""
+    out = md_to_html("| 键 | 值 |\n|---|---|\n| 主题偏好 | **深色主题**（dark mode） |\n| 偏好 | 深色主题 |")
+    assert "<table" in out and "<th" in out and "<tr>" in out
+    assert "主题偏好" in out and "深色主题" in out
+    assert "**深色主题**" not in out   # 单元格内的行内 markdown 也解析
+    assert out.count("<td") == 4       # 2 行 × 2 列
 
 
-def test_chatview_user_message_stays_plain():
-    from yoai.desktop.cosmic.theme import Palette
-    from yoai.desktop.widgets import ChatView
-
-    app = _qapp()
-    view = ChatView(Palette.light())
-    view.add_message("我", "**这不是markdown**")
-    html = view.toHtml()
-    assert "**这不是markdown**" in html   # 用户输入不被渲染
+def test_table_with_alignment_and_no_outer_pipes():
+    out = md_to_html("键 | 值\n:--- | ---:\nA | B")
+    assert "<table" in out and "A" in out and "B" in out
 
 
-def test_chat_transcript_renders_peer_markdown():
-    from yoai.desktop.cosmic.theme import Palette
-    from yoai.desktop.widgets import ChatTranscript
-
-    app = _qapp()
-    transcript = ChatTranscript(Palette.light())
-    transcript.add_message("peer", "## 结论\n\n- 一条")
-    html = transcript.toHtml()
-    assert "结论" in html and "<li" in html and "一条</li>" in html
+# Qt 集成测试放在 test_desktop.py（共用 module-scope QApplication fixture）：
+# 独立创建 QApplication 会与后续 worker 测试的资源清理竞态，导致全量崩溃。

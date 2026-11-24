@@ -8,10 +8,24 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from yai_core import AgentCore, EventType, ModelResponse, ScriptedModel, discover
+
+
+@dataclass
+class _YoAiType:
+    """YoAi 自定义事件类型（worker 只读 .value，不改 Core 的 EventType enum）。"""
+    value: str
+
+
+@dataclass
+class YoAiEvent:
+    """YoAi 侧补充事件（thinking 等 Core 不发但 UI 要展示的过程信息）。"""
+    type: Any
+    data: dict[str, Any]
 
 from yoai.capabilities import PersonalCapabilities
 from yoai.context import PersonalContext
@@ -320,10 +334,30 @@ class YoAiAgent:
             pass                   # 热加载失败不反噬主任务
         self._apply_tool_filter(task)
         final_text = ""
+
+        # thinking 是 Core 存进历史但不发事件的信息（raw_content_blocks）：
+        # 在模型包装层拦截后，跟随每个内核事件一起 drain 成 YoAiEvent 发给 UI。
+        # 不改 Core 源码、不碰历史事件语义。
+        def _drain_thinking() -> list[YoAiEvent]:
+            try:
+                model = getattr(self.core, "model", None)
+                drain = getattr(model, "drain_thinking", None)
+                if not callable(drain):
+                    return []
+                return [YoAiEvent(_YoAiType("thinking"), {"text": text})
+                        for text in drain() if text]
+            except Exception:  # noqa: BLE001
+                return []
+
         async for event in self.core.astream(task):
+            for thinking_event in _drain_thinking():
+                yield thinking_event
             if event.type == EventType.DONE:
                 final_text = str((event.data or {}).get("final_text", ""))
             yield event
+        # 收尾兜底：若最后一个事件后还有未 drain 的 thinking（异常收尾等），补发
+        for thinking_event in _drain_thinking():
+            yield thinking_event
         # 阶段B/C：确定性补充（均 opt-in，默认关闭；失败不能反噬主任务）
         if self.temporal_memory is None or not (self.memory_fallback or self.number_supplement):
             return
