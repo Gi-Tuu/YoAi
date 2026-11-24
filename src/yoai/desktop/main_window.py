@@ -540,10 +540,10 @@ class MainWindow(QMainWindow):
             return
         label = EVENT_LABELS.get(event_type, event_type)
         if event_type == "thinking":
-            # YoAi 侧拦截：Core 把 thinking 存进历史但不发事件（见 agent.astream）
-            text = str(data.get("text", "")).strip()
-            if text:
-                self._add_process(text, "think")
+            # reasoning 是逐 token 碎片，累积到同一缓冲合并显示（不能逐条成行）
+            idx = getattr(self, "_process_index", None)
+            if idx is not None:
+                self.chat.append_thinking(idx, str(data.get("text", "")))
             return
         if event_type == "delta":
             # 真·流式：模型每生成一个文本块就实时追加到正文过程块

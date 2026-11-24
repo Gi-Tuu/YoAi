@@ -73,13 +73,13 @@ def test_markdown_and_process_block_render(app, tmp_path):
     assert "**这不是markdown**" in win.chat.toHtml()
 
     idx = win.chat.begin_process("YoAi")
-    win.chat.add_process_line(idx, "正在核对偏好", "think")
+    win.chat.append_thinking(idx, "正在核对偏好")
     win.chat.add_process_line(idx, "调用 remember_fact", "step")
     assert "正在核对偏好" in win.chat.toHtml()   # 运行时展开可见
     win.chat._messages[idx].text = "已记住深色主题"
     win.chat.collapse_process(idx)
     collapsed = win.chat.toHtml()
-    assert "点击展开" in collapsed and "2 条记录" in collapsed
+    assert "点击展开" in collapsed and "1 条记录" in collapsed
     assert "正在核对偏好" not in collapsed      # 折叠后过程隐藏
     win.close()
 
@@ -213,3 +213,43 @@ def test_composer_enter_and_shift_enter(app):
     assert sent == ["第一行"]
     assert composer.text() == "第一行\n"
     composer.close()
+
+
+def test_thinking_fragments_merge_into_one_block(app, tmp_path):
+    """reasoning 逐 token 碎片（try/","/I...）必须合并成一段，不逐条成行。"""
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+    idx = win.chat.begin_process("YoAi")
+    win._process_index = idx
+    for frag in ["try", ", ", "I ", "checked", " facts", " unchanged"]:
+        win._on_event("thinking", {"text": frag})
+    msg = win.chat._messages[idx]
+    assert msg.think_buffer == "try, I checked facts unchanged"
+    html = win.chat.toHtml()
+    # 只有 1 个 [思考] 标签，而不是每碎片一个
+    assert html.count("[思考]") == 1
+    assert "try" in html and "unchanged" in html
+    # 摘要按工序数计，不因 thinking 碎片虚增
+    win.chat.collapse_process(idx)
+    assert "37 条记录" not in win.chat.toHtml()
+    win.close()
+
+
+def test_thinking_fragments_merge_into_one_block(app, tmp_path):
+    """reasoning 逐 token 碎片（try/","/I...）必须合并成一段，不逐条成行。"""
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+    idx = win.chat.begin_process("YoAi")
+    win._process_index = idx
+    for frag in ["try", ", ", "I ", "checked", " facts", " unchanged"]:
+        win._on_event("thinking", {"text": frag})
+    msg = win.chat._messages[idx]
+    assert msg.think_buffer == "try, I checked facts unchanged"
+    html = win.chat.toHtml()
+    # 只有 1 个 [思考] 标签，而不是每碎片一个
+    assert html.count("[思考]") == 1
+    assert "try" in html and "unchanged" in html
+    # 摘要按工序数计，不因 thinking 碎片虚增
+    win.chat.collapse_process(idx)
+    assert "37 条记录" not in win.chat.toHtml()
+    win.close()

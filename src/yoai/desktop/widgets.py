@@ -48,6 +48,9 @@ class _Msg:
     # 流式文本缓冲：round → 累积文本（每轮模型输出逐字追加，DONE 后定稿）
     stream_rounds: dict[int, str] | None = None
     stream_visible: bool = False   # 流式区是否在正文显示（DONE 后隐藏、摘要代替）
+    # 思考缓冲：reasoning 增量是逐 token 的碎片（"try" / "," / "I"），
+    # 必须累积成一段连续文本再显示，不能每个 token 一行（2026-11-24 截图反馈）。
+    think_buffer: str = ""
 
 
 def _esc(text: str) -> str:
@@ -186,6 +189,16 @@ class ChatView(QTextBrowser):
         if render:
             self._render()
 
+    def append_thinking(self, index: int, delta: str, *, render: bool = True) -> None:
+        """思考增量累积到同一缓冲——reasoning 是逐 token 碎片，不能逐条成行。"""
+        if not (0 <= index < len(self._messages)):
+            return
+        msg = self._messages[index]
+        if delta:
+            msg.think_buffer += str(delta)
+            if render:
+                self._render()
+
     def streamed_text(self, index: int, round_id: int | None = None) -> str:
         """取流式文本（DONE 定稿用；round_id=None 取最后一轮）。"""
         if not (0 <= index < len(self._messages)):
@@ -270,14 +283,13 @@ class ChatView(QTextBrowser):
     def _process_html(self, message: _Msg, palette: Palette, index: int) -> str:
         """过程块：运行时展开逐条显示 thinking/工序；完成后折叠为摘要行。"""
         lines = message.process or []
-        kinds = {"think": "思考", "step": "步骤", "result": "结果", "bad": "错误"}
-        counts: dict[str, int] = {}
-        for kind, _ in lines:
-            counts[kind] = counts.get(kind, 0) + 1
-        tools = counts.get("step", 0)
+        kinds = {"step": "步骤", "result": "结果", "bad": "错误"}
+        # thinking 是逐 token 碎片，走 think_buffer 合并显示，不计入"记录数"
+        steps = sum(1 for kind, _ in lines if kind == "step")
         elapsed = message.finished - message.started if message.finished else 0
         summary = (f"执行过程 · {len(lines)} 条记录"
-                   + (f" · {tools} 步" if tools else "")
+                   + (f" · {steps} 步" if steps else "")
+                   + (" · 含思考" if message.think_buffer.strip() else "")
                    + (f" · 耗时 {elapsed:.1f}s" if elapsed else ""))
         toggle = f"yoai:process:{index}"
         link_style = f"color:{palette.brick}; text-decoration:none; cursor:pointer;"
@@ -289,13 +301,25 @@ class ChatView(QTextBrowser):
             )
         rows = []
         for kind, text in lines:
+            if kind == "think":
+                continue   # thinking 走下方 think_buffer 合并渲染
             color = palette.vermilion if kind == "bad" else (
-                palette.dim if kind in ("think", "result") else palette.ink)
+                palette.dim if kind == "result" else palette.ink)
             label = kinds.get(kind, kind)
             rows.append(
                 f'<div style="margin:3px 0; color:{color}; font-size:9.5pt; line-height:150%;">'
                 f'<span style="color:{palette.weak};">[{_esc(label)}]</span> '
                 f'{md_to_html(text, link_color=palette.brick)}</div>'
+            )
+        # 思考段：碎片已累积成连续文本，一段显示（可折叠）
+        think_html = ""
+        if message.think_buffer.strip():
+            think_html = (
+                f'<div style="margin:6px 0; color:{palette.dim}; font-size:9.5pt; '
+                f'line-height:170%; background:{palette.paper2}; padding:6px 9px; '
+                f'border-left:2px solid {palette.weak};">'
+                f'<span style="color:{palette.weak};">[思考]</span> '
+                f'{md_to_html(message.think_buffer, link_color=palette.brick)}</div>'
             )
         toggle_label = "▾ 收起过程"
         # 流式文本区：运行时逐字显示模型输出（中间轮在过程块内，最终轮进正文）
@@ -315,7 +339,7 @@ class ChatView(QTextBrowser):
             f'<div style="margin:0 0 10px 0; padding:7px 10px; background:{palette.nav}; '
             f'border:1px solid {palette.rule};">'
             f'<a href="{toggle}" style="{link_style}">{toggle_label}</a>'
-            + "".join(rows) + streams + '</div>'
+            + "".join(rows) + think_html + streams + '</div>'
         )
 
     def _agent_html(self, message: _Msg, palette: Palette) -> str:
