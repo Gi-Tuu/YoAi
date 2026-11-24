@@ -1,6 +1,8 @@
 # YoAi — 个人自主智能体
 
-基于 [YAI Agent Core](../../Competition/YAI%20Agent%20Core) 构建的开源个人智能体。
+[![tests](https://github.com/Gi-Tuu/YoAi/actions/workflows/tests.yml/badge.svg)](https://github.com/Gi-Tuu/YoAi/actions/workflows/tests.yml)
+
+基于 [YAI Agent Core](https://github.com/Gi-Tuu/yai-agent-core) 构建的开源个人智能体。
 Core 是嵌入式自适应内核（规划 / 工具 / 治理 / 事件流），YoAi 是它之上的**产品层**：
 补上个人上下文、长期目标与跨会话状态，并把二者组装成可独立使用的智能体。
 

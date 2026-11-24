@@ -44,7 +44,7 @@
 
 | 项 | 当前状态 | 备注 |
 |---|---|---|
-| GitHub 仓库 | https://github.com/Gi-Tuu/YoAi（公开）；2026-11-24 17:37 已推 3 提交（UI重构/模型迁移/文档），master=2a62b04 | 最新提交见 `git log` |
+| GitHub 仓库 | https://github.com/Gi-Tuu/YoAi（公开）；master=0d0d28d；**CI 已配**（GitHub Actions，push/PR 全量 pytest，240 passed 绿） | .github/workflows/tests.yml |
 | License | PolyForm Noncommercial 1.0（限制商用） | 同系列可平滑升级商用 |
 | CLA | 版权转让型 | CLA.md + CONTRIBUTING.md |
 | 云端资料库 | `ASSISTANT-ROOT-CAUSE-BREAKTHROUGH` doc 为更新目标 | 已同步区间结论 |
