@@ -66,6 +66,7 @@ a = Analysis(
         "yoai.desktop.chat_worker",
         "yoai.desktop.chat_panel",
         "yoai.desktop.main_window",
+        "yoai.desktop.markdown_html",   # md→HTML 渲染（widgets 静态引用，显式列出防打包漏）
         "yoai.chat",
         "yoai.chat.models",
         "yoai.chat.store",

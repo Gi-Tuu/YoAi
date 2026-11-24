@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from yoai.desktop.cosmic.theme import Palette
+from yoai.desktop.markdown_html import md_to_html
 
 USER_NAMES = {"我", "user"}
 
@@ -197,7 +198,8 @@ class ChatView(QTextBrowser):
             '<table width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 20px 0;">'
             '<tr><td width="4%"></td><td width="84%">'
             + self._meta(message.who, message.time, palette.brick, palette, "left")
-            + f'<div style="color:{palette.ink}; line-height:160%;">{_esc(message.text)}</div>'
+            + f'<div style="color:{palette.ink}; line-height:160%;">'
+            + md_to_html(message.text, link_color=palette.brick) + '</div>'
             '</td><td width="12%"></td></tr></table>'
         )
 
@@ -259,13 +261,15 @@ class ChatTranscript(QTextBrowser):
             align = "right" if own else "left"
             background = palette.nav if own else palette.paper2
             border = f"border:1px solid {palette.rule};" if own else ""
+            # 对方（模型/peer）返回的是 Markdown → 渲染；自己的输入按纯文本转义显示
+            body = _esc(content) if own else md_to_html(content, link_color=palette.brick)
             parts.append(
                 f'<table width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 14px 0;">'
                 f'<tr><td align="{align}">'
                 f'<span style="color:{palette.brick if not own else palette.dim}; font-size:9pt;">[{_esc(name)}]</span>'
                 f'<table cellspacing="0" cellpadding="10" width="78%" '
                 f'style="background:{background}; {border}">'
-                f'<tr><td style="color:{palette.ink}; line-height:150%;">{_esc(content)}</td></tr></table>'
+                f'<tr><td style="color:{palette.ink}; line-height:150%;">{body}</td></tr></table>'
                 '</td></tr></table>'
             )
         for notice in self._notices:
