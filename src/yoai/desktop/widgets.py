@@ -51,6 +51,8 @@ class _Msg:
     # 思考缓冲：reasoning 增量是逐 token 的碎片（"try" / "," / "I"），
     # 必须累积成一段连续文本再显示，不能每个 token 一行（2026-11-24 截图反馈）。
     think_buffer: str = ""
+    # 思考默认折叠：只留「查看思考过程」入口，不打扰正文阅读（2026-11-24 用户拍板）。
+    think_collapsed: bool = True
 
 
 def _esc(text: str) -> str:
@@ -154,16 +156,21 @@ class ChatView(QTextBrowser):
         self._render()
 
     def _on_anchor(self, url) -> None:
-        """过程块的「展开/折叠」锚点：切换当前轮 process_collapsed 并重渲染。"""
+        """过程块 / 思考段的「展开/折叠」锚点（各自独立切换）。"""
         link = url.toString() if hasattr(url, "toString") else str(url)
-        if not link.startswith("yoai:process:"):
+        kind = "process" if link.startswith("yoai:process:") else (
+            "think" if link.startswith("yoai:think:") else None)
+        if kind is None:
             return
         try:
             index = int(link.rsplit(":", 1)[-1])
             msg = self._messages[index]
         except (ValueError, IndexError):
             return
-        msg.process_collapsed = not msg.process_collapsed
+        if kind == "process":
+            msg.process_collapsed = not msg.process_collapsed
+        else:
+            msg.think_collapsed = not msg.think_collapsed
         self._render()
 
     def begin_process(self, who: str = "YoAi", *, render: bool = True) -> int:
@@ -311,16 +318,25 @@ class ChatView(QTextBrowser):
                 f'<span style="color:{palette.weak};">[{_esc(label)}]</span> '
                 f'{md_to_html(text, link_color=palette.brick)}</div>'
             )
-        # 思考段：碎片已累积成连续文本，一段显示（可折叠）
+        # 思考段：默认折叠只留入口，点击才展开（碎片已累积成一段连续文本）
         think_html = ""
         if message.think_buffer.strip():
-            think_html = (
-                f'<div style="margin:6px 0; color:{palette.dim}; font-size:9.5pt; '
-                f'line-height:170%; background:{palette.paper2}; padding:6px 9px; '
-                f'border-left:2px solid {palette.weak};">'
-                f'<span style="color:{palette.weak};">[思考]</span> '
-                f'{md_to_html(message.think_buffer, link_color=palette.brick)}</div>'
-            )
+            think_link = f"yoai:think:{index}"
+            if message.think_collapsed:
+                think_html = (
+                    f'<div style="margin:6px 0; font-size:9.5pt;">'
+                    f'<a href="{think_link}" style="{link_style}">'
+                    f'▸ 查看思考过程（{len(message.think_buffer)} 字）</a></div>'
+                )
+            else:
+                think_html = (
+                    f'<div style="margin:6px 0; color:{palette.dim}; font-size:9.5pt; '
+                    f'line-height:170%; background:{palette.paper2}; padding:6px 9px; '
+                    f'border-left:2px solid {palette.weak};">'
+                    f'<a href="{think_link}" style="{link_style}">▾ 收起思考过程</a>'
+                    f'<div style="margin-top:5px;">'
+                    f'{md_to_html(message.think_buffer, link_color=palette.brick)}</div></div>'
+                )
         toggle_label = "▾ 收起过程"
         # 流式文本区：运行时逐字显示模型输出（中间轮在过程块内，最终轮进正文）
         streams = ""
