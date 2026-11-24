@@ -23,11 +23,29 @@ class ChannelWorker(QThread):
         self._channel = channel
         self._message = message
 
+    def requestInterruption(self) -> None:  # noqa: N802 - Qt 方法名
+        """真正中断：Qt 标志 + 取消 asyncio 任务（否则关窗后线程残留）。"""
+        super().requestInterruption()
+        task = getattr(self, "_asyncio_task", None)
+        loop = getattr(self, "_loop", None)
+        if task is not None and loop is not None and not task.done():
+            loop.call_soon_threadsafe(task.cancel)
+
     def run(self) -> None:  # noqa: D102
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._asyncio_task: asyncio.Task | None = None
+
+        async def _main() -> list:
+            self._loop = asyncio.get_running_loop()
+            self._asyncio_task = asyncio.current_task()
+            return await self._channel.send(self._message)
+
         try:
-            produced = asyncio.run(self._channel.send(self._message))
+            produced = asyncio.run(_main())
             for msg in produced:
                 self.message_produced.emit(msg)
             self.send_done.emit(len(produced))
+        except asyncio.CancelledError:
+            return   # 关窗取消，不是错误
         except Exception as exc:  # noqa: BLE001 - 线程内兜住，不拖垮 UI
             self.send_error.emit(f"{type(exc).__name__}: {exc}")

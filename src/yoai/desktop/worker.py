@@ -30,9 +30,32 @@ class AgentWorker(QThread):
         self._evidence_store = evidence_store
         self._evidence_meta = evidence_meta or {}
 
+    def requestInterruption(self) -> None:  # noqa: N802 - Qt 方法名
+        """真正中断：Qt 标志 + 取消当前 asyncio 任务。
+
+        只调父类实现会设置标志位，但 asyncio.run 里的协程从不检查它——
+        wait(2000) 超时后线程仍活着，窗口关了进程却不退（2026-11-24 残留根因）。
+        """
+        super().requestInterruption()
+        task = getattr(self, "_asyncio_task", None)
+        loop = getattr(self, "_loop", None)
+        if task is not None and loop is not None and not task.done():
+            loop.call_soon_threadsafe(task.cancel)
+
     def run(self) -> None:  # noqa: D102 - QThread 入口
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._asyncio_task: asyncio.Task | None = None
+
+        async def _main() -> None:
+            self._loop = asyncio.get_running_loop()
+            self._asyncio_task = asyncio.current_task()
+            try:
+                await self._consume()
+            except asyncio.CancelledError:
+                return   # 用户关窗导致的取消，不是错误，不弹报错
+
         try:
-            asyncio.run(self._consume())
+            asyncio.run(_main())
         except Exception as exc:  # noqa: BLE001 - 线程内必须兜住，不能让 UI 卡死
             self.task_error.emit(f"{type(exc).__name__}: {exc}")
 

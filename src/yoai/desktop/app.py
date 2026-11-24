@@ -195,6 +195,16 @@ def main() -> int:
     from yoai.evidence import EvidenceStore
 
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # 单实例守卫：已有桌面实例在跑时，第二个启动直接退出（self-check 除外）。
+    # 必须保活到进程结束——guard 被 GC 会释放 server，第二实例就能起来了。
+    from yoai.desktop.single_instance import SingleInstanceGuard
+    guard = SingleInstanceGuard()
+    if not guard.acquire():
+        print("YoAi 已在运行（单实例模式），本次启动已退出。", flush=True)
+        return 0
+    app._yoai_instance_guard = guard   # 保活引用，随 QApplication 生命周期
+
     data_dir = _default_data_dir()
 
     # 证据基础设施：每次对话自动采集真事件 → 落盘 → 归因

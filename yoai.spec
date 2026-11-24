@@ -59,6 +59,8 @@ a = Analysis(
         "yoai.demo_model",
         "yoai.demo_world",
         "yoai.desktop",
+        "yoai.desktop.single_instance",   # 单实例守卫（2026-11-24）
+        "PySide6.QtNetwork",              # QLocalServer/QLocalSocket
         "yoai.desktop.worker",
         "yoai.desktop.chat_worker",
         "yoai.desktop.chat_panel",
