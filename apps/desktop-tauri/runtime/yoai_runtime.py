@@ -22,11 +22,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# --- 路径自举：允许从 apps/desktop-tauri/runtime 直接运行 ---
+# --- 路径自举：兼容两种部署位置 ---
+#  A) 源码树 apps/desktop-tauri/runtime/ → parents[2] = YoAi 根
+#  B) 打包/执行目录 dist/runtime/       → parents[1] = YoAi 根
+# 另外支持 YOAI_SRC / YAI_CORE_SRC 环境变量显式指定（脱离源码树部署时用）。
 _HERE = Path(__file__).resolve()
-_YOAI_ROOT = _HERE.parents[2]          # apps/desktop-tauri/runtime → YoAi 根
-for _p in (_YOAI_ROOT / "src", os.environ.get("YAI_CORE_SRC", "")):
-    if _p and str(_p) not in sys.path:
+_candidates = [
+    os.environ.get("YOAI_SRC", ""),      # 显式：YoAi 根（其下有 src/yoai）
+    str(_HERE.parents[2] / "src"),       # A) apps/desktop-tauri/runtime → 根/src
+    str(_HERE.parents[1] / "src"),       # B) dist/runtime → 根/src
+    os.environ.get("YAI_CORE_SRC", ""),  # Core 源码（yai_core 包所在）
+]
+for _p in _candidates:
+    if _p and Path(_p).is_dir() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
 from protocol import (  # noqa: E402  (自举后导入)
