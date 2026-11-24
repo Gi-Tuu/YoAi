@@ -7,7 +7,7 @@
 | Node.js | 22.x（实测 22.22.2） | 前端构建 |
 | Rust（rustup） | stable + MSVC toolchain | Tauri 原生编译 |
 | Python | 3.13（实测 3.13.15） | YoAi Runtime（开发模式） |
-| YoAi 源码 | `E:/agent/YoAi`（开发机） | `yoai` 包 + Core 通过 PYTHONPATH 引用 |
+| YoAi 源码 | `$YOAI_ROOT`（本机工程根） | `yoai` 包 + Core 通过 PYTHONPATH 引用 |
 
 Rust 安装：`https://rustup.rs`（Windows 选 MSVC toolchain）。
 验证：`cargo --version` 应有版本号；若报 "error reading rustc version"，
@@ -18,8 +18,8 @@ Rust 安装：`https://rustup.rs`（Windows 选 MSVC toolchain）。
 
 ```bash
 # 设 Python（含 yoai 与 yai_core 的 venv）
-set YOAI_PYTHON=E:\Competition\YAI Agent Core\.venv\Scripts\python.exe
-set YAI_CORE_SRC=E:\Competition\YAI Agent Core\src
+set YOAI_PYTHON=<含 yoai 与 yai_core 的 python.exe 绝对路径>
+set YAI_CORE_SRC=<YAI Agent Core 的 src 目录绝对路径>
 
 cd apps/desktop-tauri
 npm install
