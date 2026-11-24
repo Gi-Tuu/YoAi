@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -335,29 +336,76 @@ class YoAiAgent:
         self._apply_tool_filter(task)
         final_text = ""
 
-        # thinking 是 Core 存进历史但不发事件的信息（raw_content_blocks）：
-        # 在模型包装层拦截后，跟随每个内核事件一起 drain 成 YoAiEvent 发给 UI。
+        # 流式增量（thinking / 文本 delta）由 provider 包装层暂存。Core 的 achat
+        # 是"await 完才返回"的一次性接口——只有并发轮询才能在模型生成期间实时推 UI。
+        # 起后台 poller 每 20ms drain outbox 到 queue；主循环同时消费 Core 事件与 queue。
         # 不改 Core 源码、不碰历史事件语义。
-        def _drain_thinking() -> list[YoAiEvent]:
+        extra_queue: asyncio.Queue[YoAiEvent] = asyncio.Queue()
+
+        def _drain_model_events() -> list[YoAiEvent]:
             try:
                 model = getattr(self.core, "model", None)
-                drain = getattr(model, "drain_thinking", None)
-                if not callable(drain):
-                    return []
-                return [YoAiEvent(_YoAiType("thinking"), {"text": text})
-                        for text in drain() if text]
+                out: list[YoAiEvent] = []
+                drain_t = getattr(model, "drain_thinking", None)
+                if callable(drain_t):
+                    out.extend(YoAiEvent(_YoAiType("thinking"), {"text": t})
+                               for t in drain_t() if t)
+                drain_x = getattr(model, "drain_text", None)
+                if callable(drain_x):
+                    out.extend(YoAiEvent(_YoAiType("delta"), {"round": r, "text": t})
+                               for r, t in drain_x() if t)
+                return out
             except Exception:  # noqa: BLE001
                 return []
 
-        async for event in self.core.astream(task):
-            for thinking_event in _drain_thinking():
-                yield thinking_event
-            if event.type == EventType.DONE:
-                final_text = str((event.data or {}).get("final_text", ""))
-            yield event
-        # 收尾兜底：若最后一个事件后还有未 drain 的 thinking（异常收尾等），补发
-        for thinking_event in _drain_thinking():
-            yield thinking_event
+        async def _poll_outbox() -> None:
+            while True:
+                for extra in _drain_model_events():
+                    await extra_queue.put(extra)
+                await asyncio.sleep(0.02)
+
+        poller = asyncio.create_task(_poll_outbox())
+        core_iter = self.core.astream(task).__aiter__()
+        core_task: asyncio.Task | None = None
+        queue_task: asyncio.Task | None = None
+        try:
+            while True:
+                # 先清空已就绪的流式增量（实时性优先）
+                while not extra_queue.empty():
+                    yield extra_queue.get_nowait()
+                if core_task is None:
+                    core_task = asyncio.create_task(core_iter.__anext__())
+                if queue_task is None:
+                    queue_task = asyncio.create_task(extra_queue.get())
+                done, _ = await asyncio.wait(
+                    {core_task, queue_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                # 流式增量：取走后重建 task，core_task 不动（绝不取消，避免丢事件）
+                if queue_task in done:
+                    yield queue_task.result()
+                    queue_task = asyncio.create_task(extra_queue.get())
+                # Core 事件：取走后重建 task；StopAsyncIteration 表明事件流结束
+                if core_task in done:
+                    try:
+                        event = core_task.result()
+                    except StopAsyncIteration:
+                        break
+                    core_task = asyncio.create_task(core_iter.__anext__())
+                    if event.type == EventType.DONE:
+                        final_text = str((event.data or {}).get("final_text", ""))
+                    yield event
+        finally:
+            for t in (core_task, queue_task):
+                if t is not None and not t.done():
+                    t.cancel()
+            poller.cancel()
+            try:
+                await poller
+            except asyncio.CancelledError:
+                pass
+            # 收尾兜底：最后事件后未 drain 的增量（异常收尾等），补发
+            for extra in _drain_model_events():
+                yield extra
         # 阶段B/C：确定性补充（均 opt-in，默认关闭；失败不能反噬主任务）
         if self.temporal_memory is None or not (self.memory_fallback or self.number_supplement):
             return

@@ -45,6 +45,9 @@ class _Msg:
     process_collapsed: bool = False
     started: float = 0.0      # time.monotonic() 起跑时刻，用于摘要"耗时 Xs"
     finished: float = 0.0
+    # 流式文本缓冲：round → 累积文本（每轮模型输出逐字追加，DONE 后定稿）
+    stream_rounds: dict[int, str] | None = None
+    stream_visible: bool = False   # 流式区是否在正文显示（DONE 后隐藏、摘要代替）
 
 
 def _esc(text: str) -> str:
@@ -164,10 +167,33 @@ class ChatView(QTextBrowser):
         """新开一条带过程块的助手消息（本轮执行起点）。返回消息索引。"""
         idx = len(self._messages)
         self._messages.append(_Msg(who, "", datetime.now().strftime("%H:%M"),
-                                   process=[], started=time.monotonic()))
+                                   process=[], started=time.monotonic(),
+                                   stream_rounds={}, stream_visible=True))
         if render:
             self._render()
         return idx
+
+    def append_stream_text(self, index: int, round_id: int, delta: str,
+                           *, render: bool = True) -> None:
+        """模型生成期间逐字追加流式文本（每轮独立，UI 实时刷新）。"""
+        if not (0 <= index < len(self._messages)):
+            return
+        msg = self._messages[index]
+        if msg.stream_rounds is None:
+            msg.stream_rounds = {}
+        msg.stream_rounds[round_id] = msg.stream_rounds.get(round_id, "") + str(delta)
+        msg.stream_visible = True
+        if render:
+            self._render()
+
+    def streamed_text(self, index: int, round_id: int | None = None) -> str:
+        """取流式文本（DONE 定稿用；round_id=None 取最后一轮）。"""
+        if not (0 <= index < len(self._messages)):
+            return ""
+        rounds = self._messages[index].stream_rounds or {}
+        if round_id is None:
+            return rounds[max(rounds)] if rounds else ""
+        return rounds.get(round_id, "")
 
     def add_process_line(self, index: int, text: str, kind: str = "step",
                          *, render: bool = True) -> None:
@@ -182,6 +208,7 @@ class ChatView(QTextBrowser):
         if 0 <= index < len(self._messages) and self._messages[index].process is not None:
             msg = self._messages[index]
             msg.process_collapsed = True
+            msg.stream_visible = False   # 流式区已定稿到正文，避免重复显示
             msg.finished = time.monotonic()
             if render:
                 self._render()
@@ -271,11 +298,24 @@ class ChatView(QTextBrowser):
                 f'{md_to_html(text, link_color=palette.brick)}</div>'
             )
         toggle_label = "▾ 收起过程"
+        # 流式文本区：运行时逐字显示模型输出（中间轮在过程块内，最终轮进正文）
+        streams = ""
+        if message.stream_visible and message.stream_rounds:
+            for round_id in sorted(message.stream_rounds):
+                text = message.stream_rounds[round_id]
+                if not text:
+                    continue
+                streams += (
+                    f'<div style="margin:6px 0 2px 0; color:{palette.ink}; '
+                    f'line-height:165%; border-left:2px solid {palette.brick}; '
+                    f'padding-left:8px;">'
+                    f'{md_to_html(text, link_color=palette.brick)}</div>'
+                )
         return (
             f'<div style="margin:0 0 10px 0; padding:7px 10px; background:{palette.nav}; '
             f'border:1px solid {palette.rule};">'
             f'<a href="{toggle}" style="{link_style}">{toggle_label}</a>'
-            + "".join(rows) + '</div>'
+            + "".join(rows) + streams + '</div>'
         )
 
     def _agent_html(self, message: _Msg, palette: Palette) -> str:

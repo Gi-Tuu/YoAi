@@ -38,6 +38,56 @@ def _resp(text: str, *, tool_use: dict | None = None, usage=(10, 5)):
     )
 
 
+def _events_from_response(resp):
+    """把一次性假响应转成 SDK 流式事件序列（供 stream 路径测试复用）。"""
+    events = []
+    usage = getattr(resp, "usage", None) or {}
+    get = (lambda k: getattr(usage, k, 0)) if not isinstance(usage, dict) else (
+        lambda k: usage.get(k, 0))
+    for idx, block in enumerate(getattr(resp, "content", None) or []):
+        b = block if isinstance(block, dict) else vars(block)
+        kind = b.get("type", "text")
+        start = {"type": kind}
+        if kind == "tool_use":
+            start.update({k: v for k, v in b.items() if k in ("id", "name")})
+        # text/thinking 的文本由 delta 累积，start 不带，避免重复
+        events.append(SimpleNamespace(type="content_block_start", index=idx,
+                                      content_block=SimpleNamespace(**start)))
+        if kind == "text":
+            events.append(SimpleNamespace(
+                type="content_block_delta", index=idx,
+                delta=SimpleNamespace(type="text_delta", text=b.get("text", ""))))
+        elif kind == "tool_use":
+            import json
+            events.append(SimpleNamespace(
+                type="content_block_delta", index=idx,
+                delta=SimpleNamespace(type="input_json_delta",
+                                      partial_json=json.dumps(b.get("input", {})))))
+        events.append(SimpleNamespace(type="content_block_stop", index=idx))
+    events.append(SimpleNamespace(
+        type="message_delta",
+        usage=SimpleNamespace(input_tokens=get("input_tokens"),
+                              output_tokens=get("output_tokens"))))
+    return events
+
+
+class _FakeStream:
+    def __init__(self, events):
+        self._events = events
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    def __aiter__(self):
+        async def _gen():
+            for e in self._events:
+                yield e
+        return _gen()
+
+
 class _FakeMessages:
     def __init__(self, script):
         self._script = list(script)
@@ -49,6 +99,13 @@ class _FakeMessages:
         if isinstance(item, Exception):
             raise item
         return item
+
+    def stream(self, **kwargs):
+        self.calls.append(kwargs)
+        item = self._script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return _FakeStream(_events_from_response(item))
 
 
 class _FakeClient:

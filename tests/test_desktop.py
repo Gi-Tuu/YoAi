@@ -99,6 +99,30 @@ def test_process_block_wired_to_events(app, tmp_path):
     win.close()
 
 
+def test_stream_text_renders_live_then_collapses(app, tmp_path):
+    """流式文本逐字追加到正文、DONE 后定稿折叠（每轮独立）。"""
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path)
+    win = MainWindow(agent)
+    idx = win.chat.begin_process("YoAi")
+    win._process_index = idx
+    # 断言用内部缓冲（Qt setHtml 会在逐字重载时插 span，toHtml 里字被拆开）
+    for ch in ["你", "好", "，"]:
+        win._on_event("delta", {"round": 0, "text": ch})
+    assert win.chat.streamed_text(idx, 0) == "你好，"   # 运行时逐字可见
+    for ch in ["世", "界"]:
+        win._on_event("delta", {"round": 1, "text": ch})
+    assert win.chat.streamed_text(idx, 1) == "世界"
+    html_live = win.chat.toHtml()
+    assert "你" in html_live and "好" in html_live and "世" in html_live
+    win.chat._messages[idx].text = "你好，世界"
+    win.chat.collapse_process(idx)
+    html = win.chat.toHtml()
+    assert "点击展开" in html
+    assert "好" in html   # 定稿正文可见
+    assert win.chat._messages[idx].stream_visible is False   # 流式区折叠后隐藏，不重复
+    win.close()
+
+
 def test_worker_signal_drives_real_loop(app, tmp_path):
     from PySide6.QtCore import QEventLoop, QTimer
 

@@ -545,6 +545,13 @@ class MainWindow(QMainWindow):
             if text:
                 self._add_process(text, "think")
             return
+        if event_type == "delta":
+            # 真·流式：模型每生成一个文本块就实时追加到正文过程块
+            idx = getattr(self, "_process_index", None)
+            if idx is not None:
+                self.chat.append_stream_text(idx, int(data.get("round", 0)),
+                                             str(data.get("text", "")))
+            return
         if event_type == "strategy_selected":
             strategy = data.get("strategy", "")
             self._append_trace(f"{label}：{strategy}")
@@ -610,8 +617,11 @@ class MainWindow(QMainWindow):
                            kind="ok" if approved else "bad")
 
     def _on_done(self, final_text: str) -> None:
-        cleaned = self._clean_final_text(final_text) or "（任务完成，但没有返回最终文本）"
         idx = getattr(self, "_process_index", None)
+        # final_text 为空但流式有内容（异常收尾/网关差异）→ 用流式缓冲定稿
+        if not final_text.strip() and idx is not None:
+            final_text = self.chat.streamed_text(idx)
+        cleaned = self._clean_final_text(final_text) or "（任务完成，但没有返回最终文本）"
         if idx is not None:
             # 最终结果写进本轮过程块的正文，过程折叠只留摘要行
             self.chat._messages[idx].text = cleaned

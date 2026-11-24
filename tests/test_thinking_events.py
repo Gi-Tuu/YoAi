@@ -1,4 +1,4 @@
-"""thinking 事件链路测试（2026-11-24）。
+"""thinking / 流式 delta 事件链路测试（2026-11-24）。
 
 Core 把 thinking 块存进 raw_content_blocks / 历史，但**不发事件**——UI 拿不到。
 YoAi 侧在 CoreAnthropicModelProvider 拦截 → YoAiAgent.astream drain 成自定义事件。
@@ -7,6 +7,7 @@ YoAi 侧在 CoreAnthropicModelProvider 拦截 → YoAiAgent.astream drain 成自
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -83,3 +84,53 @@ async def test_astream_without_thinking_provider_is_unaffected(tmp_path, monkeyp
     monkeypatch.setattr(agent.core, "astream", only_done)
     events = [e async for e in agent.astream("x")]
     assert len(events) == 1 and events[0].data["final_text"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_astream_emits_delta_events(tmp_path, monkeypatch):
+    """流式增量事件在 Core 事件之前实时发出（每轮都流式）。"""
+    from yai_core import EventType, AgentEvent
+
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path, temporal_memory=False)
+    pending = [(0, "你"), (0, "好"), (0, "，"), (1, "世"), (1, "界")]
+    def _drain():
+        nonlocal pending
+        items, pending = pending, []
+        return items
+    agent.core.model = SimpleNamespace(drain_thinking=lambda: [], drain_text=_drain)
+
+    async def core_events(task):
+        yield AgentEvent(EventType.TOOL_CALL, {"tool": "x"})
+        yield AgentEvent(EventType.DONE, {"final_text": "你好，世界"})
+        await asyncio.sleep(0.1)   # 给 poller 时间 drain
+
+    monkeypatch.setattr(agent.core, "astream", core_events)
+    events = [e async for e in agent.astream("x")]
+    deltas = [e.data for e in events if getattr(e.type, "value", "") == "delta"]
+    assert [d["text"] for d in deltas] == ["你", "好", "，", "世", "界"]
+    assert [d["round"] for d in deltas] == [0, 0, 0, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_astream_emits_delta_events(tmp_path, monkeypatch):
+    """流式增量事件在 Core 事件之前实时发出（每轮都流式）。"""
+    from yai_core import EventType, AgentEvent
+
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path, temporal_memory=False)
+    pending = [(0, "你"), (0, "好"), (0, "，"), (1, "世"), (1, "界")]
+    def _drain():
+        nonlocal pending
+        items, pending = pending, []
+        return items
+    agent.core.model = SimpleNamespace(drain_thinking=lambda: [], drain_text=_drain)
+
+    async def core_events(task):
+        yield AgentEvent(EventType.TOOL_CALL, {"tool": "x"})
+        yield AgentEvent(EventType.DONE, {"final_text": "你好，世界"})
+        await asyncio.sleep(0.1)   # 给 poller 时间 drain
+
+    monkeypatch.setattr(agent.core, "astream", core_events)
+    events = [e async for e in agent.astream("x")]
+    deltas = [e.data for e in events if getattr(e.type, "value", "") == "delta"]
+    assert [d["text"] for d in deltas] == ["你", "好", "，", "世", "界"]
+    assert [d["round"] for d in deltas] == [0, 0, 0, 1, 1]
