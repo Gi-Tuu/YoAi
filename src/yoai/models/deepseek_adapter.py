@@ -126,22 +126,36 @@ def _pull_system(messages: list[dict[str, Any]] | None) -> str:
 
 
 def _openai_messages_to_anthropic(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """OpenAI 线格式 → Anthropic messages（system 移走；tool 结果变 user 块）。"""
+    """OpenAI 线格式 → Anthropic messages（system 移走；tool 结果变 user 块）。
+
+    Anthropic 硬约束：assistant 一条消息里的多个 tool_use，其 tool_result 必须
+    在**紧接着的一条** user 消息里全部给出（各自一个 tool_result block）。
+    Core 则是一条 assistant(tool_calls×N) + N 条独立 tool 消息——必须合并，
+    否则网关 400：「tool_use ids were found without tool_result blocks immediately
+    after」（2026-11-24 真实生产复现）。
+    """
     out: list[dict[str, Any]] = []
+    pending_tool_results: list[dict[str, Any]] = []
+
+    def flush_tool_results() -> None:
+        if pending_tool_results:
+            out.append({"role": "user", "content": list(pending_tool_results)})
+            pending_tool_results.clear()
+
     for m in messages:
         role = m.get("role", "")
         if role == "system":
             continue
         if role == "tool":
-            out.append({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": m.get("tool_call_id", ""),
-                    "content": str(m.get("content", "")),
-                }],
+            # 连续 tool 消息合并进同一条 user；遇到非 tool 消息时由下方 flush
+            pending_tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": m.get("tool_call_id", ""),
+                "content": str(m.get("content", "")),
             })
             continue
+        # 非 tool 消息到来：先把攒着的 tool_result 刷出去，保持"紧跟"语义
+        flush_tool_results()
         if role == "assistant" and m.get("tool_calls"):
             blocks: list[dict[str, Any]] = []
             content = m.get("content", "")
@@ -175,6 +189,7 @@ def _openai_messages_to_anthropic(messages: list[dict[str, Any]]) -> list[dict[s
             )
         out.append({"role": role if role in ("user", "assistant") else "user",
                     "content": content if isinstance(content, str) else ""})
+    flush_tool_results()   # 末尾连续 tool 消息也要收尾
     return out
 
 
