@@ -3,7 +3,7 @@
 设计原则：
 - **用 Core 现成电池**（filesystem_capabilities / filesystem_gate / build_spec），
   不重复造轮子；全部通过 Core 公开 API 注册，内核零改动、升级天然兼容。
-- **安全边界由宿主声明**：根目录 E:/agent/YoAi/workspace/，读全根目录、
+- **安全边界由宿主声明**：根目录 项目内 workspace/ 目录，读全根目录、
   写只在 workspace/ 子目录内；符号链接不跟随、大小上限用 Core 保守默认值。
 - 联网工具无 key：web_search 用公开的 freeserp.ai，web_fetch 用标准库、
   限 https + 长度 + 超时；失败如实返回错误文本（不静默）。

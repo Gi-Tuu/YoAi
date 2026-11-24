@@ -67,10 +67,10 @@ class YoAiAgent:
         模型吐 DSML 被拒（2026-11-24 真实生产 bug）。通过 Core 的 learning SPI 注入，
         不改内核、Core 升级天然兼容；传 False 关闭。
         builtin_tools: 默认 False——是否注册实操工具（file_list/read/create/patch、
-        web_search/web_fetch）。开启后 AI 能读写 E:/agent/YoAi/workspace/ 内的文件、
+        web_search/web_fetch）。开启后 AI 能读写 项目内 workspace/ 目录 内的文件、
         访问公开网页；写操作限白名单子目录并带 Core 的 filesystem_gate。
         保守默认关闭，验证通过后再决定是否设默认。
-        workspace_root: builtin_tools 的文件根目录，缺省 E:/agent/YoAi/workspace/。"""
+        workspace_root: builtin_tools 的文件根目录，缺省 项目内 workspace/ 目录。"""
         data_dir = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
         self.context = PersonalContext(data_dir / "context.json")
         self.goals = GoalManager(data_dir / "goals.json")
