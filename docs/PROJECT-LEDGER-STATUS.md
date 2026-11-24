@@ -35,7 +35,8 @@
 | judge 环境 | env 回退 bug 已修（加 Core 目录回退） | score_longmemeval.py |
 | 进化机制 | 接线完成，价值未证实，暂停 | EVOLUTION-WIRING.md |
 | assistant 弱项 | 根因（截断）已修，专项 96.7%；剩余波动来自自记随机性 | — |
-| 全量测试 | **224 passed**, 50 warnings | 2026-11-24 14:10 实跑 |
+| 全量测试 | **228 passed**, 50 warnings | 2026-11-24 14:30 实跑 |
+| Anthropic路径 | 多tool_result合并到一条user消息，根治HTTP400 tool_use无result(生产复现)；真实端点验证400消失；下一个坑thinking块回传已记录未修 | ANTHROPIC-TOOL-RESULT-400.md |
 
 ## C. 工程与对外
 
