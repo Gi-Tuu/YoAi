@@ -26,12 +26,14 @@ def _agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) ->
     if data_dir is not None and enable:
         kwargs["workspace_root"] = Path(data_dir) / "workspace"
 
-    # 权限：auto 档——白名单内自动放行，其余走 channel.confirm() 弹窗。
-    # 白名单 = 只读工具 + 内部状态写入（记忆/目标）；文件写必须用户确认。
-    # 不传权限配置时 Core 默认 allow_all（全放行，启动有警告）——生产不用它。
+    # 权限档位（Core 三档 allow_all / auto / deny_all）：
+    # - 默认 auto：白名单内放行，文件写等白名单外工具弹窗确认
+    # - YOAI_PERMISSION_MODE=allow_all：全部自动放行，不弹窗（临时测试/信任环境）
+    # - self-check 强制 allow_all：无人点弹窗
     from yai_core.policy import AllowlistPolicy
-    if auto_approve:
-        kwargs["policy"] = AllowlistPolicy(mode="allow_all")   # self-check 无人点弹窗
+    env_mode = os.environ.get("YOAI_PERMISSION_MODE", "").strip().lower()
+    if auto_approve or env_mode == "allow_all":
+        kwargs["policy"] = AllowlistPolicy(mode="allow_all")
         return kwargs
     readonly_and_internal = {
         "all_topics", "events_between", "facts_by_tag", "list_facts", "list_goals",
