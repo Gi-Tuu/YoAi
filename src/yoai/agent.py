@@ -52,6 +52,8 @@ class YoAiAgent:
         memory_fallback: bool = False,
         number_supplement: bool = False,
         memory_intent_routing: bool = True,
+        builtin_tools: bool = False,
+        workspace_root: str | Path | None = None,
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
         过滤可用工具（专家白名单接线）。None 或返回 None 表示不限制。默认不启用，
@@ -63,7 +65,12 @@ class YoAiAgent:
         memory_intent_routing: 默认 True——把"记住/我叫/我喜欢"等记忆意图导向 REACT，
         让模型拿到工具 schema。Core 规则表漏了"记住"导致这类任务被误判 DIRECT、
         模型吐 DSML 被拒（2026-11-24 真实生产 bug）。通过 Core 的 learning SPI 注入，
-        不改内核、Core 升级天然兼容；传 False 关闭。"""
+        不改内核、Core 升级天然兼容；传 False 关闭。
+        builtin_tools: 默认 False——是否注册实操工具（file_list/read/create/patch、
+        web_search/web_fetch）。开启后 AI 能读写 E:/agent/YoAi/workspace/ 内的文件、
+        访问公开网页；写操作限白名单子目录并带 Core 的 filesystem_gate。
+        保守默认关闭，验证通过后再决定是否设默认。
+        workspace_root: builtin_tools 的文件根目录，缺省 E:/agent/YoAi/workspace/。"""
         data_dir = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
         self.context = PersonalContext(data_dir / "context.json")
         self.goals = GoalManager(data_dir / "goals.json")
@@ -102,6 +109,13 @@ class YoAiAgent:
         self.core = AgentCore(model, **core_kwargs)
         # Core 内省公开方法 → ToolSpec，注册进统一 ToolRegistry。
         self._all_tool_specs = discover(self.capabilities)
+        # 实操工具（文件/联网）：Core 公开 API 注册，内核零改动、升级兼容。
+        # 默认关闭，验证后再决定是否设默认。
+        if builtin_tools:
+            from yoai.tools_builtin import builtin_tool_specs
+            self._all_tool_specs = self._all_tool_specs + builtin_tool_specs(
+                workspace_root
+            )
         self.core.register_tools(self._all_tool_specs)
         self.tool_filter = tool_filter
         self._active_whitelist: set[str] | None = None

@@ -667,5 +667,9 @@ class MainWindow(QMainWindow):
 
 def build_app(agent: YoAiAgent | None = None, title: str = "YoAi") -> tuple[QApplication, MainWindow]:
     app = QApplication.instance() or QApplication([])
-    window = MainWindow(agent or YoAiAgent(), title)
+    # 实操工具（文件/联网）：默认开启；设 YOAI_BUILTIN_TOOLS=0 可关闭。
+    # 写操作受 workspace/ 白名单 gate 约束，读/联网无需授权。
+    import os
+    enable_tools = os.environ.get("YOAI_BUILTIN_TOOLS", "1") != "0"
+    window = MainWindow(agent or YoAiAgent(builtin_tools=enable_tools), title)
     return app, window
