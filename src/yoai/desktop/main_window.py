@@ -68,6 +68,7 @@ class MainWindow(QMainWindow):
         session_manager=None,
         evidence_store=None,
         evolution_archive=None,
+        approval_channel=None,
     ) -> None:
         super().__init__()
         self.agent = agent
@@ -76,6 +77,9 @@ class MainWindow(QMainWindow):
         self.session_manager = session_manager
         self.evidence_store = evidence_store
         self.evolution_archive = evolution_archive
+        self.approval_channel = approval_channel
+        if approval_channel is not None:
+            approval_channel.confirm_requested.connect(self._on_approval_requested)
         self.worker: AgentWorker | None = None
         # 本轮是否出现过内核错误事件（error/permission_denied/budget_exceeded）。
         # Core 允许"报错后仍发 done"，若在 done 里无脑标"已完成"会掩盖失败——
@@ -534,6 +538,33 @@ class MainWindow(QMainWindow):
         else:
             self._append_trace(label)
 
+    def _on_approval_requested(self, tool: str, shown_json: str, loop, future) -> None:
+        """主线程弹窗：用户确认/拒绝 Core 的写操作审批请求。"""
+        from PySide6.QtWidgets import QMessageBox
+        import json as _json
+        try:
+            shown = _json.loads(shown_json)
+            import pprint
+            detail = pprint.pformat(shown, width=60, sort_dicts=False)
+        except Exception:  # noqa: BLE001
+            detail = shown_json
+        limit = detail if len(detail) <= 900 else detail[:900] + "\n…（已截断）"
+        reason = shown.get("reason", "") if isinstance(shown, dict) else ""
+        prompt = shown.get("prompt", "") if isinstance(shown, dict) else ""
+        text = f"YoAi 请求执行工具：{tool}\n\n"
+        if prompt or reason:
+            text += f"理由：{prompt or reason}\n\n"
+        text += f"参数/上下文：\n{limit}\n\n确认执行吗？"
+        answer = QMessageBox.question(
+            self, "工具执行确认", text,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,   # 默认拒绝（失败关闭）
+        )
+        approved = answer == QMessageBox.Yes
+        from yoai.desktop.approval import set_future
+        loop.call_soon_threadsafe(set_future, future, approved)
+        self._append_trace(f"审批：{tool} → {'同意' if approved else '拒绝'}",
+                           kind="ok" if approved else "bad")
+
     def _on_done(self, final_text: str) -> None:
         cleaned = self._clean_final_text(final_text) or "（任务完成，但没有返回最终文本）"
         self._append_chat("YoAi", cleaned)
@@ -655,6 +686,9 @@ class MainWindow(QMainWindow):
         self.goals_card.set_count(len(goals))
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self.approval_channel is not None:
+            # 所有等待中的审批一律拒绝，避免 worker 卡在 confirm() 不退
+            self.approval_channel.shutdown.emit()
         if self.worker is not None and self.worker.isRunning():
             self.worker.requestInterruption()
             self.worker.wait(2000)

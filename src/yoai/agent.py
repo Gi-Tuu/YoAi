@@ -54,6 +54,8 @@ class YoAiAgent:
         memory_intent_routing: bool = True,
         builtin_tools: bool = False,
         workspace_root: str | Path | None = None,
+        channel: Any = None,
+        policy: Any = None,
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
         过滤可用工具（专家白名单接线）。None 或返回 None 表示不限制。默认不启用，
@@ -101,6 +103,11 @@ class YoAiAgent:
         core_kwargs: dict[str, Any] = {"outcome_verifier": verifier}
         if memory is not None:
             core_kwargs["memory"] = memory
+        # 审批通道与权限策略在构造时绑定（Core 的 loop 持有引用，事后换无效）。
+        if channel is not None:
+            core_kwargs["channel"] = channel
+        if policy is not None:
+            core_kwargs["policy"] = policy
         # YoAi 侧路由：有工具就注入完整 schema（REACT），让模型自己决定调不调。
         # 根治 DIRECT"不给 schema 却给工具目录"的矛盾——不再靠词表打地鼠。
         # 继承 Core 公开类，不改内核、升级兼容；False 关闭恢复纯 Core 行为。

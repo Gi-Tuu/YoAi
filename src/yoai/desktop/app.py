@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 
-def _agent_kwargs(data_dir=None) -> dict:
+def _agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) -> dict:
     """桌面端 agent 构造参数：实操工具默认开，YOAI_BUILTIN_TOOLS=0 可关。
 
     会话里的 agent 由 SessionManager 创建，必须在这里显式传——
@@ -25,6 +25,23 @@ def _agent_kwargs(data_dir=None) -> dict:
     kwargs = {"builtin_tools": enable}
     if data_dir is not None and enable:
         kwargs["workspace_root"] = Path(data_dir) / "workspace"
+
+    # 权限：auto 档——白名单内自动放行，其余走 channel.confirm() 弹窗。
+    # 白名单 = 只读工具 + 内部状态写入（记忆/目标）；文件写必须用户确认。
+    # 不传权限配置时 Core 默认 allow_all（全放行，启动有警告）——生产不用它。
+    from yai_core.policy import AllowlistPolicy
+    if auto_approve:
+        kwargs["policy"] = AllowlistPolicy(mode="allow_all")   # self-check 无人点弹窗
+        return kwargs
+    readonly_and_internal = {
+        "all_topics", "events_between", "facts_by_tag", "list_facts", "list_goals",
+        "recall_fact", "related_events", "summarize_theme",
+        "file_list", "file_read", "web_search", "web_fetch",
+        "remember_event", "remember_fact", "create_goal", "complete_goal",
+    }
+    kwargs["policy"] = AllowlistPolicy(allowed=readonly_and_internal, mode="auto")
+    if channel is not None:
+        kwargs["channel"] = channel
     return kwargs
 
 
@@ -59,7 +76,7 @@ def _self_check() -> int:
         return ExpertModelProvider(DemoModel(), ExpertRouter(evo_archive), evo_archive)
 
     sessions = SessionManager(data_dir / "sessions", model_factory=selfcheck_model,
-                              agent_kwargs=_agent_kwargs(data_dir))
+                              agent_kwargs=_agent_kwargs(data_dir, auto_approve=True))
     if not sessions.list_sessions():
         sessions.create("自检会话")
     agent = sessions.current_agent()
@@ -215,8 +232,14 @@ def main() -> int:
         provider, _ = _build_main_model(data_dir)
         return provider
 
+    # 审批通道：Core 的 auto 权限档遇到文件写等白名单外工具时弹窗等用户确认。
+    # 必须在建 agent 前创建——Core 在 AgentCore 构造时绑定 channel。
+    from yoai.desktop.approval import ApprovalChannel
+    approval = ApprovalChannel()
+    app._yoai_approval = approval   # 保活
+
     sessions = SessionManager(data_dir / "sessions", model_factory=model_factory,
-                              agent_kwargs=_agent_kwargs(data_dir))
+                              agent_kwargs=_agent_kwargs(data_dir, channel=approval))
     if not sessions.list_sessions():
         sessions.create("新会话")
     agent = sessions.current_agent()
@@ -231,7 +254,7 @@ def main() -> int:
     window = MainWindow(
         agent, channel=channel, registry=registry,
         session_manager=sessions, evidence_store=evidence_store,
-        evolution_archive=archive,
+        evolution_archive=archive, approval_channel=approval,
     )
     window.show()
     return app.exec()
