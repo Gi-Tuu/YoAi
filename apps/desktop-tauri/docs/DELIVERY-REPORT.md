@@ -60,7 +60,8 @@
 | 性能基准 | **5 passed** |
 | Runtime 真握手 | `ready` + 26 个真实工具（含 shell_run/open_url） |
 | Runtime 真任务 | "1+1" → final "2" → done，事件 seq 0..51 完整 |
-| Tauri 原生构建 | 🟡 Rust 已装（镜像 77s）、crate 已配镜像下载；**卡在 MSVC 链接器**：系统无 VS Build Tools，且 Git Bash 的 GNU `link.exe` 抢占名字（`link: extra operand`）。VS Build Tools 安装中，装完需重编 |
+| Tauri Rust 原生编译 | ✅ **通过**：`cargo build --release` EXIT=0（33.29s），exe 9.8MB 生成。`src-tauri/target/release/yoai-desktop-tauri.exe` |
+| Tauri 完整打包（msi/nsis） | 🟡 验证中（WiX/NSIS 首次下载） |
 
 ## 四、性能对照（jsdom 前端层实测）
 
@@ -75,11 +76,11 @@
 
 ## 五、剩余问题（诚实标注）
 
-1. **MSVC 链接器缺失**：Rust + crate 镜像已解决（rustc 1.100 装好、478 包下载完成），
-   但 Windows MSVC 工具链（VS Build Tools）未装，且 Git Bash 的 GNU `link.exe`
-   抢占 PATH 导致 `link: extra operand`。VS Build Tools 后台安装中。
-   **Tauri 原生编译/端到端未实测**——这是环境依赖，不是 Rust 代码问题
-   （前端 tsc/build 已过，Rust 代码待 MSVC 就绪后验证）。
+1. ~~MSVC 链接器缺失~~ **已解决**：装了 VS Build Tools 2022（含 C++ 工具 + Windows SDK
+   10.0.26100.0）。编译环境坑（Git Bash GNU link.exe 抢占、cmd/vcvars 引号、
+   PowerShell 调 cmd 被沙箱拦截）的最终解法：在 PowerShell 里**直接设置**
+   `PATH/INCLUDE/LIB/LIBPATH` 指向 MSVC + SDK（见 `scripts/build-env.ps1` 与
+   `WINDOWS-BUILD.md`），绕开所有中间层。Rust 编译已通过。
 2. **嵌入式 Python 未准备**：正式包需把 CPython + yoai/yai_core 放进
    `src-tauri/resources/`（步骤见 `WINDOWS-BUILD.md`），当前未做。
 3. **设置页/会话页 UI**、**悬浮拖动/位置记忆/DPI**：未实现（功能对应表标 🟡/⏳）。
