@@ -19,7 +19,8 @@
 | 生产工具集 | **18个**：12记忆/目标 + 4文件(file_list/read/create/patch) + 2联网(web_search/fetch)；文件工具用Core现成电池+gate，读全workspace/、写限白名单子目录 | PRODUCTION-TOOL-SILENT-FAILURE.md |
 | 生产问题修复 | ①DIRECT静默失败→工具优先路由(YoAiRouter) ②UI错误可见 ③实操工具 ④过渡语停住→适配层re-ask；均YoAi侧不改内核 | PRODUCTION-STALL-REASK.md 等 |
 | 桌面exe(2026-11-24) | **13:45重新打包** `dist/YoAi.exe`，自检确认18工具(旧exe是01:57快照)；session路径开关遗漏已修；**单实例+干净退出已验**(第二实例被拒、关窗无残留进程) | PRODUCTION-TOOL-SILENT-FAILURE.md |
-| 进程/单实例 | QLocalSocket单实例守卫(进程死OS自动释放，无陈旧锁)；worker的requestInterruption真cancel asyncio任务，根治关窗后YoAi.exe残留；216 passed | src/yoai/desktop/single_instance.py |
+| 进程/单实例 | QLocalSocket单实例守卫(进程死OS自动释放，无陈旧锁)；worker的requestInterruption真cancel asyncio任务，根治关窗后YoAi.exe残留 | src/yoai/desktop/single_instance.py |
+| 权限3档 | 桌面用Core的AllowlistPolicy(auto档)：只读+记忆/目标内部写白名单自动过，文件写弹窗确认(默认拒绝/关窗一律拒绝)；Core默认CollectChannel.confirm永远True已替换；219 passed | src/yoai/desktop/approval.py |
 | 500题全量 | **已完成**（2026-11-23，免费额度最后一天） | — |
 | 评测提速 | **已完成**：题内并发8路(3.8-6.7×)+judge并发8路(6×)，500题17h→2.5-4.5h，等价性验证通过 | BENCH-SPEED-OPTIMIZATION-PLAN.md |
 
@@ -34,7 +35,7 @@
 | judge 环境 | env 回退 bug 已修（加 Core 目录回退） | score_longmemeval.py |
 | 进化机制 | 接线完成，价值未证实，暂停 | EVOLUTION-WIRING.md |
 | assistant 弱项 | 根因（截断）已修，专项 96.7%；剩余波动来自自记随机性 | — |
-| 全量测试 | **216 passed**, 50 warnings | 2026-11-24 13:45 实跑 |
+| 全量测试 | **219 passed**, 50 warnings | 2026-11-24 13:50 实跑 |
 
 ## C. 工程与对外
 
