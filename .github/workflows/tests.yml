@@ -1,0 +1,45 @@
+# CI：每次 push / PR 在干净环境跑全量 pytest。
+#
+# Core 内核不随本仓库分发：CI 上从公开镜像 Gi-Tuu/yai-agent-core@main
+# checkout 到 ./core，再经 tests/conftest.py 的 YAI_CORE_SRC 注入 sys.path
+# （与本地开发的发现逻辑同一套约定）。
+#
+# UI 测试需要 Qt 但 runner 无显示：QT_QPA_PLATFORM=offscreen 走离屏渲染，
+# 与本地 Qt 自渲染截图的路径一致。
+
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+      YAI_CORE_SRC: ${{ github.workspace }}/core
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout Core（YoAi 的产品内核，公开镜像）
+        uses: actions/checkout@v4
+        with:
+          repository: Gi-Tuu/yai-agent-core
+          ref: main
+          path: core
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio PySide6 anthropic
+
+      - name: 跑全量测试
+        run: pytest tests/ -q --tb=short
