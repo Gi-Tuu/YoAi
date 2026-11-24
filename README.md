@@ -10,7 +10,7 @@ Core 是嵌入式自适应内核（规划 / 工具 / 治理 / 事件流），YoA
 >
 > | 能力 | 状态 | 依据 |
 > |---|---|---|
-> | 桌面窗口 / 离线演示模型 | 可用 | 228 项测试 + Qt 自渲染截图 + exe 自检 |
+> | 桌面窗口 / 离线演示模型 | 可用 | 240 项测试 + Qt 自渲染截图 + exe 自检 |
 > | 真实模型接入（讯飞 spark-x2.6 / 百度百炼） | 可用 | 端到端实测，见 `docs/MODEL-GATEWAY-CANDIDATES.md` |
 > | 个人事实 / 长期目标 / 会话持久化 | 可用 | 单测覆盖 |
 > | 通讯协作（阶段 A/B/C，含外部智能体分级接入） | 可用 | 离线三智能体 + 真接入分级标注 |
@@ -243,9 +243,13 @@ key 只在内存使用，不回显/不写盘/不进结果，usage 透传给预�
 
 主对话接法（一行换模型）：
 ```python
-from yoai.models import DeepSeekAnthropicAdapter, GatewayModelProvider
-agent = YoAiAgent(model=GatewayModelProvider(DeepSeekAnthropicAdapter()))
+from yoai.models import CoreAnthropicModelProvider   # Anthropic 兼容网关（DeepSeek 等）
+from yoai.models import GatewayModelProvider, SuanliAdapter  # OpenAI 兼容网关
+agent = YoAiAgent(model=CoreAnthropicModelProvider())        # 内部用 Core 官方 AnthropicProvider
 ```
+> Anthropic 协议网关已迁移到 **Core 官方 `AnthropicProvider`**（协议翻译 / prompt cache /
+> 多模态 / thinking 块回传由 Core 维护），YoAi 包装层保留异常降级与过渡语重试，
+> 详见 [`docs/MODEL-MIGRATION-CORE-ANTHROPIC.md`](docs/MODEL-MIGRATION-CORE-ANTHROPIC.md)。
 > 第一轮真实模型端到端测试（算里免费 DeepSeek：单轮对话 / 工具调用 / 多轮工具链）
 > 已跑通，详见 [`docs/ROUND1-REAL-MODEL-TEST.md`](docs/ROUND1-REAL-MODEL-TEST.md)。
 
@@ -294,6 +298,15 @@ from yai_core import OpenAICompatProvider
 from yoai import YoAiAgent
 
 agent = YoAiAgent(model=OpenAICompatProvider())
+```
+
+Anthropic 协议网关（如 DeepSeek `/anthropic` 端点）用 Core 官方 Provider 的 YoAi 包装：
+
+```python
+from yoai.models import CoreAnthropicModelProvider
+
+agent = YoAiAgent(model=CoreAnthropicModelProvider())
+# 需环境变量 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL
 ```
 
 ## 安全提醒（使用前必读）

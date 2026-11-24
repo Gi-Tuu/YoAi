@@ -35,8 +35,10 @@
 | judge 环境 | env 回退 bug 已修（加 Core 目录回退） | score_longmemeval.py |
 | 进化机制 | 接线完成，价值未证实，暂停 | EVOLUTION-WIRING.md |
 | assistant 弱项 | 根因（截断）已修，专项 96.7%；剩余波动来自自记随机性 | — |
-| 全量测试 | **228 passed**, 50 warnings | 2026-11-24 14:30 实跑 |
-| Anthropic路径 | 多tool_result合并到一条user消息，根治HTTP400 tool_use无result(生产复现)；真实端点验证400消失；下一个坑thinking块回传已记录未修 | ANTHROPIC-TOOL-RESULT-400.md |
+| 全量测试 | **240 passed**, 50 warnings | 2026-11-24 16:40 实跑 |
+| Anthropic路径 | 多tool_result合并到一条user消息，根治HTTP400 tool_use无result(生产复现)；thinking块回传已由Core官方实现接管 | ANTHROPIC-TOOL-RESULT-400.md |
+| **模型迁移(2026-11-24)** | 主对话 DeepSeek Anthropic 网关路径 → **Core 官方 AnthropicProvider**（YoAi 包装层保留异常降级+stall 重试）；peer 聊天仍走旧 adapter；prompt_cache 默认关；真实网关两轮工具循环验证无 400 | MODEL-MIGRATION-CORE-ANTHROPIC.md |
+| Core thinking 分支 | d4a2204 已 fast-forward 合并进 Core main（未 push origin）；Core 相关测试 63 passed | MODEL-MIGRATION-CORE-ANTHROPIC.md |
 
 ## C. 工程与对外
 

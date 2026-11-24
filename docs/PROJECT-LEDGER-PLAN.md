@@ -4,11 +4,9 @@
 
 | # | 待办 | 状态 | 下一步 | 需拍板 |
 |---|---|---|---|---|
-| 9 | **Core 更新：thinking/signature 块回传** | **待转发** | 把 `docs/CORE-UPDATE-REQUEST.md` 转给 Core 负责人；这是唯一真需要 Core 改的项（ModelResponse.raw 有原始块但 loop 构造 assistant 消息时丢弃） | 你（转发） |
-| 10 | Anthropic thinking 坑的本地绕法 | 未做 | 在 Core 修好前，评估换不带 thinking 的 `ANTHROPIC_MODEL`（治标）或 `ModelResponse.raw` 侧回注；见 ANTHROPIC-TOOL-RESULT-400.md | — |
 | 3 | 进化机制重启 | 暂停 | 解决"工具白名单限制反降分"根因 | — |
 | 6 | UI 美化 | 后置 | — | — |
-| 7 | README 对外版 | 后置 | 已更新到当前状态（228 测试/18 工具/权限 3 档），但仍偏内部视角，面向开源访客重写 | — |
+| 7 | README 对外版 | 后置 | 已更新到当前状态（228 测试/18 工具/权限 3 档），但仍偏内部视角，面向开源访客重写；模型迁移后测试数已变 240 | — |
 | 8 | judge 换官方 gpt-4o | 未做 | 需 OpenAI key；唯一无法靠免费额度解决的项 | — |
 
 > 项 2（生产侧记忆写入保障）**已完成并移出**：真实生产验证兜底接管成功、
@@ -25,6 +23,10 @@
 - 进程残留 + 多实例（真 cancel + QLocalSocket 单实例）
 - Core 权限 3 档落地（auto + 审批弹窗，allow_all 环境变量开关）
 - Anthropic tool_result 400（改用 Core 官方转换，thinking 坑转项 10）
+- ~~#9 Core thinking 更新~~：**已合并**——thinking 分支 d4a2204 已 fast-forward 进 Core main
+  （用户拍板"都是我的项目，帮我合并"，无需再转发需求），Core 测试 63 passed
+- ~~#10 thinking 本地绕法~~：**不再需要**——主对话已迁到 Core 官方 AnthropicProvider，
+  thinking 块回传自动生效；见 MODEL-MIGRATION-CORE-ANTHROPIC.md
 
 ## 维护约定
 
