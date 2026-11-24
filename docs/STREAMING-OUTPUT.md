@@ -51,6 +51,27 @@ task（会丢事件）。
   最终轮 27 个逐字增量，tool_use 聚合正确、无 400；
 - 全量 **283 passed**。
 
+## 补充修复：桌面 exe 仍整块出现（同日晚）
+
+第一版只改了 Anthropic 路径，但桌面实际走的是 **SuanliAdapter（讯飞 spark-x2.6，
+从 Core .env 读取）→ GatewayModelProvider**（`_build_main_model` 第一优先），
+流式 provider 根本没被使用——这是"exe 里还是整块"的真正根因。
+
+修复：
+
+1. **`SuanliAdapter._send_stream()`**：OpenAI 兼容 SSE（`stream:true`）逐行读增量，
+   content 进 `text_outbox`、reasoning_content 进 `thinking_outbox`（思考模型增量
+   在 reasoning_content），工具调用 arguments 按 index 聚合后交既有提取逻辑；
+   `YOAI_STREAM=0` 回退一次性 `post_json`；
+2. **`YoAiAgent._outbox_provider()`**：沿 `.base` **和 `.adapter`** 穿透包装链
+   ——桌面真实链是 `ExpertModelProvider → GatewayModelProvider → SuanliAdapter`，
+   第一版只穿透 `.base` 拿不到 adapter 的增量；
+3. 两个既有测试显式 `stream=False` 保持非流式重试语义，新增 SSE 聚合测试
+   （content/reasoning/tool_calls/usage）和包装链 drain 测试。
+
+**真实网关验证**：讯飞 spark-x2.6 支持 SSE，单轮返回"蓝色"、`text_outbox` 有增量、
+thinking 37 个增量——exe 路径现在也是逐字输出。
+
 ## 配置
 
 | 变量 | 默认 | 说明 |

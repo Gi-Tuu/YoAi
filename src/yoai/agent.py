@@ -342,9 +342,25 @@ class YoAiAgent:
         # 不改 Core 源码、不碰历史事件语义。
         extra_queue: asyncio.Queue[YoAiEvent] = asyncio.Queue()
 
+        def _outbox_provider():
+            """找带 outbox 的真实 provider：core.model 可能是 ExpertModelProvider
+            等包装层，thinking/delta 存在其 .base 上（桌面生产路径就是如此）。"""
+            node = getattr(self.core, "model", None)
+            seen: set[int] = set()
+            while node is not None and id(node) not in seen:
+                seen.add(id(node))
+                if callable(getattr(node, "drain_text", None)) or callable(
+                    getattr(node, "drain_thinking", None)
+                ):
+                    return node
+                # 桌面生产走 Suanli → GatewayModelProvider(adapter)，增量在 adapter 上
+                next_node = getattr(node, "base", None) or getattr(node, "adapter", None)
+                node = next_node
+            return None
+
         def _drain_model_events() -> list[YoAiEvent]:
             try:
-                model = getattr(self.core, "model", None)
+                model = _outbox_provider()
                 out: list[YoAiEvent] = []
                 drain_t = getattr(model, "drain_thinking", None)
                 if callable(drain_t):

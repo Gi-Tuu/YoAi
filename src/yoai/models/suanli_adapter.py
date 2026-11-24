@@ -112,6 +112,13 @@ class SuanliAdapter(PeerAdapter):
         # HTTP 错误（429/401/5xx）不重试，避免放大限流或配置问题。
         self.transport_retries = max(0, transport_retries)
         self.last_status = ""
+        # 流式 outbox（2026-11-24）：OpenAI 兼容 SSE 增量暂存，
+        # YoAiAgent.poller drain 成 delta 事件 → UI 逐字显示。
+        # 网关不支持 stream 时设 YOAI_STREAM=0 回退一次性 post_json。
+        self.stream = os.environ.get("YOAI_STREAM", "1") != "0"
+        self.text_outbox: list[tuple[int, str]] = []
+        self.thinking_outbox: list[str] = []
+        self.stream_round = -1
 
     def _config(self) -> tuple[str, str, str]:
         env = read_env_file(self.env_path)
@@ -168,6 +175,8 @@ class SuanliAdapter(PeerAdapter):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if self.stream:
+            return self._send_stream(base, key, payload)
         data = None
         http_error: ModelHTTPError | None = None
         transport_error: ModelTransportError | None = None
@@ -206,6 +215,118 @@ class SuanliAdapter(PeerAdapter):
             return AdapterResult(False, level=self.level, detail="网关返回空文本", meta={"usage": usage})
         return AdapterResult(True, text=text, level=self.level, meta={"usage": usage},
                              tool_calls=tool_calls)
+
+
+    def _send_stream(self, base: str, key: str, payload: dict[str, Any]) -> AdapterResult:
+        """OpenAI 兼容 SSE 流式发送：增量推 outbox，聚合结果走既有提取逻辑。
+
+        网关实测（讯飞 spark-x2.6）：思考模型的增量在 delta.reasoning_content，
+        正式回答在 delta.content——两者都推（reasoning 进 thinking_outbox）。
+        tool_calls 的 arguments 以 JSON 片段增量出现，按 index 聚合。
+        """
+        import json as _json
+        import urllib.request as _urlreq
+
+        self.stream_round += 1
+        round_id = self.stream_round
+        payload = {**payload, "stream": True}
+        body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = _urlreq.Request(
+            base + "/chat/completions", data=body,
+            headers={"Content-Type": "application/json", "User-Agent": "YoAi/1.0",
+                     "Authorization": "Bearer " + key},
+            method="POST",
+        )
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: dict[int, dict[str, Any]] = {}
+        usage: dict[str, Any] = {}
+        try:
+            with _urlreq.urlopen(req, timeout=self.timeout_s) as resp:
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = _json.loads(data_str)
+                    except Exception:  # noqa: BLE001 - 坏块跳过，不能中断整轮
+                        continue
+                    if isinstance(chunk.get("usage"), dict):
+                        usage = chunk["usage"]
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0] or {}).get("delta") or {}
+                    text = delta.get("content") or ""
+                    reasoning = delta.get("reasoning_content") or ""
+                    if text:
+                        content_parts.append(text)
+                        self.text_outbox.append((round_id, text))
+                    if reasoning:
+                        reasoning_parts.append(reasoning)
+                        self.thinking_outbox.append(reasoning)
+                    for call in delta.get("tool_calls") or []:
+                        idx = int(call.get("index", 0))
+                        slot = tool_calls.setdefault(idx, {
+                            "id": "", "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        })
+                        if call.get("id"):
+                            slot["id"] = call["id"]
+                        fn = call.get("function") or {}
+                        if fn.get("name"):
+                            slot["function"]["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            slot["function"]["arguments"] += fn["arguments"]
+        except ModelHTTPError as exc:
+            self.last_status = f"http_{exc.status}"
+            return AdapterResult(False, level=self.level,
+                                 detail=friendly_http_error(exc.status, exc.message),
+                                 meta={"http_status": exc.status})
+        except (Exception,) as exc:  # noqa: BLE001 - 与 send 同步路径同语义（含 URLError/timeout）
+            self.last_status = "transport_error"
+            return AdapterResult(False, level=self.level,
+                                 detail=f"网关连接失败：{type(exc).__name__}: {exc}（已重试）"
+                                 if self.transport_retries else
+                                 f"网关连接失败：{type(exc).__name__}: {exc}")
+
+        # 聚合：content 缺失时用 reasoning_content（与非流式 _extract_text 同语义）
+        full_text = "".join(content_parts).strip() or "".join(reasoning_parts).strip()
+        calls = []
+        for idx in sorted(tool_calls):
+            slot = tool_calls[idx]
+            try:
+                slot["function"]["arguments"] = _json.loads(slot["function"]["arguments"])
+            except Exception:  # noqa: BLE001
+                slot["function"]["arguments"] = {}
+            calls.append(slot)
+        usage_norm = {
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        }
+        self.add_usage(usage_norm)
+        self.last_status = "ok"
+        if not full_text and not calls:
+            return AdapterResult(False, level=self.level, detail="网关返回空文本",
+                                 meta={"usage": usage_norm})
+        return AdapterResult(True, text=full_text, level=self.level,
+                             meta={"usage": usage_norm}, tool_calls=calls)
+
+    def drain_text(self) -> list[tuple[int, str]]:
+        """取走并清空流式文本增量 [(round, delta), ...]（UI 逐字显示用）。"""
+        items = list(self.text_outbox)
+        self.text_outbox.clear()
+        return items
+
+    def drain_thinking(self) -> list[str]:
+        """取走并清空流式思考增量（reasoning_content）。"""
+        items = list(self.thinking_outbox)
+        self.thinking_outbox.clear()
+        return items
 
 
 def _extract_text(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:

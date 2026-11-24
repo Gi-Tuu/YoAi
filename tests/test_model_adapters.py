@@ -111,6 +111,7 @@ def test_suanli_success_with_fake_response(monkeypatch, tmp_path):
 
     monkeypatch.setattr(mod, "post_json", fake_post)
     a = SuanliAdapter(env_path=p)
+    a.stream = False   # 本测试验证非流式路径（SSE 路径另测）
     r = a.send("hi")
     assert r.ok is True and r.text == "算里回答"
     assert "sk_secret_xyz" not in r.detail and "sk_secret_xyz" not in str(r.meta)
@@ -164,7 +165,9 @@ def test_transport_retry_then_success(monkeypatch, tmp_path):
             raise ModelTransportError("simulated timeout")
         return {"choices": [{"message": {"content": "ok"}}]}
     monkeypatch.setattr(mod, "post_json", flaky)
-    r = SuanliAdapter(env_path=p, transport_retries=2).send("hi")
+    adapter = SuanliAdapter(env_path=p, transport_retries=2)
+    adapter.stream = False   # 本测试验证非流式重试（SSE 路径另测）
+    r = adapter.send("hi")
     assert r.ok is True and len(calls) == 3
 
     # HTTP 429 不应重试 → 只1次
@@ -173,7 +176,9 @@ def test_transport_retry_then_success(monkeypatch, tmp_path):
         calls.append(url)
         raise ModelHTTPError(429, "rate limited")
     monkeypatch.setattr(mod, "post_json", rate_limited)
-    r2 = SuanliAdapter(env_path=p, transport_retries=3).send("hi")
+    limited = SuanliAdapter(env_path=p, transport_retries=3)
+    limited.stream = False
+    r2 = limited.send("hi")
     assert r2.ok is False and "429" in r2.detail and len(calls) == 1
 
 
@@ -182,3 +187,50 @@ def test_missing_config_is_unavailable(tmp_path):
     assert a.available() is False
     r = a.send("hi")
     assert r.ok is False and "缺少" in r.detail
+
+
+def test_suanli_stream_sse(monkeypatch, tmp_path):
+    """OpenAI 兼容 SSE：content/reasoning 增量进 outbox，tool_calls 聚合。"""
+    import json
+    import yoai.models.suanli_adapter as mod
+
+    p = tmp_path / ".env"
+    p.write_text("OPENAI_BASE_URL=https://fake/v1\nOPENAI_API_KEY=k\nLLM_MODEL=m\n",
+                 encoding="utf-8")
+
+    lines = [
+        'data: ' + json.dumps({"choices": [{"delta": {"reasoning_content": "先查"}}]}),
+        'data: ' + json.dumps({"choices": [{"delta": {"content": "你"}}]}),
+        'data: ' + json.dumps({"choices": [{"delta": {"content": "好"}}]}),
+        'data: ' + json.dumps({"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "c1", "function": {"name": "lookup", "arguments": '{"q":'}}
+        ]}}]}),
+        'data: ' + json.dumps({"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "function": {"arguments": '"x"}'}}
+        ]}}]}),
+        'data: ' + json.dumps({"usage": {"prompt_tokens": 5, "completion_tokens": 3}}),
+        'data: [DONE]',
+    ]
+
+    class _Resp:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def __iter__(self):
+            return iter([(line + "\n").encode() for line in lines])
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: _Resp())
+    a = SuanliAdapter(env_path=p)
+    assert a.stream is True
+    r = a.send("hi")
+    assert r.ok is True and r.text == "你好"
+    assert a.drain_text() == [(0, "你"), (0, "好")]
+    assert a.drain_thinking() == ["先查"]
+    assert r.tool_calls and r.tool_calls[0]["function"]["arguments"] == {"q": "x"}
+    assert r.meta["usage"]["prompt_tokens"] == 5
+    assert r.meta["usage"]["completion_tokens"] == 3
+    assert a.drain_text() == []   # drain 后清空
+
+

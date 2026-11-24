@@ -134,3 +134,31 @@ async def test_astream_emits_delta_events(tmp_path, monkeypatch):
     deltas = [e.data for e in events if getattr(e.type, "value", "") == "delta"]
     assert [d["text"] for d in deltas] == ["你", "好", "，", "世", "界"]
     assert [d["round"] for d in deltas] == [0, 0, 0, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_astream_drains_through_gateway_adapter(tmp_path, monkeypatch):
+    """桌面真实路径 ExpertModelProvider→GatewayModelProvider→SuanliAdapter 的增量能 drain。"""
+    from types import SimpleNamespace
+    from yai_core import EventType, AgentEvent
+
+    from yoai.models import GatewayModelProvider
+
+    agent = YoAiAgent(model=DemoModel(), data_dir=tmp_path, temporal_memory=False)
+    adapter = SimpleNamespace(
+        drain_thinking=lambda: ["思考"],
+        drain_text=lambda: [(0, "逐"), (0, "字")],
+    )
+    gateway = GatewayModelProvider.__new__(GatewayModelProvider)
+    gateway.adapter = adapter
+    # 模拟 core.model 是 ExpertModelProvider(base=gateway)
+    agent.core.model = SimpleNamespace(base=gateway)
+
+    async def core_events(task):
+        yield AgentEvent(EventType.DONE, {"final_text": "逐字"})
+
+    monkeypatch.setattr(agent.core, "astream", core_events)
+    events = [e async for e in agent.astream("x")]
+    kinds = [(getattr(e.type, "value", ""), e.data.get("text")) for e in events]
+    assert ("thinking", "思考") in kinds
+    assert ("delta", "逐") in kinds and ("delta", "字") in kinds
