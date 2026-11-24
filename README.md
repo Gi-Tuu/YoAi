@@ -10,13 +10,14 @@ Core 是嵌入式自适应内核（规划 / 工具 / 治理 / 事件流），YoA
 >
 > | 能力 | 状态 | 依据 |
 > |---|---|---|
-> | 桌面窗口 / 离线演示模型 | 可用 | 197 项测试 + Qt 自渲染截图 |
-> | 真实模型接入（DeepSeek / 算里） | 可用 | HTTP 200 端到端实测 |
+> | 桌面窗口 / 离线演示模型 | 可用 | 212 项测试 + Qt 自渲染截图 + exe 自检 |
+> | 真实模型接入（讯飞 spark-x2.6 / 百度百炼） | 可用 | 端到端实测，见 `docs/MODEL-GATEWAY-CANDIDATES.md` |
 > | 个人事实 / 长期目标 / 会话持久化 | 可用 | 单测覆盖 |
 > | 通讯协作（阶段 A/B/C，含外部智能体分级接入） | 可用 | 离线三智能体 + 真接入分级标注 |
+> | **实操工具（文件读写 / 联网）** | **可用** | 18 工具，写操作带作用域 gate，见 `docs/PRODUCTION-TOOL-SILENT-FAILURE.md` |
 > | 长期记忆层（temporal_memory） | 实验 | 评测口径与分数见 `docs/FINAL-SUMMARY.md` |
 > | M2 进化引擎 | 实验 | 门控已接通，验证样本 0 条，尚无晋升 |
-> | Event & Scheduler / 真实工具集成 / 弱网适配 | 未做 | 见文末"尚未实现" |
+> | Event & Scheduler / 弱网适配 | 未做 | 见文末"尚未实现" |
 >
 > 许可证：**PolyForm Noncommercial 1.0.0**（禁止商用，见 `LICENSE`）。
 
@@ -29,8 +30,10 @@ Core 是嵌入式自适应内核（规划 / 工具 / 治理 / 事件流），YoA
 | Goal Manager（长期目标与进度） | **YoAi** | 跨会话记住"要达成什么" |
 | 门面 / CLI / 未来 Web·桌面壳 | **YoAi** | 把能力组装成终端产品 |
 
-红线：**不侵入 Core**。`src/yai_core/` 零改动；YoAi 只通过 Core 的公开 API
-（`AgentCore` / `discover` / 事件流）接入，个人状态走自己的 JSON 存储。
+**与 Core 的边界**：Core 是产品内核、可以改，但改动必须能跟随 Core 自身更新。
+当前所有改造都在 YoAi 侧——通过 Core 的公开扩展点（`AgentCore` / `discover` /
+`RouteSelector` / 公开 Router 继承 / filesystem 电池）实现，`src/yai_core/` 零改动；
+个人状态走自己的 JSON 存储。这样 Core 升级时天然兼容，不必 rebase 私有改动。
 
 ## 目录结构
 
@@ -38,13 +41,22 @@ Core 是嵌入式自适应内核（规划 / 工具 / 治理 / 事件流），YoA
 src/yoai/
   context.py       Personal Context：个人事实持久化（原子写 + 损坏隔离）
   goals.py         Goal Manager：长期目标 CRUD + 状态流转
-  capabilities.py  宿主业务能力（被 Core 内省成工具）
-  agent.py         YoAiAgent 门面：组装 Core + Context + Goals
-  cli.py           命令行入口
+  capabilities.py   宿主业务能力（被 Core 内省成工具）
+  agent.py          YoAiAgent 门面：组装 Core + Context + Goals
+  routing.py        工具优先路由（有工具就注入完整 schema，消除静默失败）
+  tools_builtin.py  实操工具：filesystem 电池（文件读写）+ 联网（搜索/抓取）
+  temporal_memory.py 时间记忆层（YoAi 内覆盖层）
+  session.py        SessionManager：会话隔离 + 历史持久化
+  cli.py            命令行入口
 tests/
-  test_state.py    Context / Goals 持久化单测
-  test_agent.py    工具内省 + 端到端事件流 + 默认模型
-output/            本地状态（context.json / goals.json），gitignore
+  test_state.py     Context / Goals 持久化单测
+  test_agent.py     工具内省 + 端到端事件流 + 默认模型
+  test_routing.py   工具优先路由
+  test_tools_builtin.py 文件读写 gate + 联网
+  test_gateway_continuation.py 过渡语 re-ask
+output/             本地状态（context.json / goals.json），gitignore
+workspace/          实操工具的默认文件根目录（AI 可读写，写限子目录）
+docs/               设计、根因案例、成绩与台账（见 docs/PROJECT-LEDGER-STATUS.md）
 ```
 
 ## 桌面 APP（真实窗口）
@@ -57,7 +69,7 @@ YoAi 是标准 Qt Widgets 桌面应用，采用纸墨工作台布局：左侧导
 
 ```bash
 export YOAI_ROOT=/path/to/YoAi          # 本仓库根目录
-export CORE_ROOT=/path/to/YAI-Agent-Core # YAI Agent Core 源码根目录（只读上游）
+export CORE_ROOT=/path/to/YAI-Agent-Core # YAI Agent Core 源码根目录（产品内核，当前零改动）
 export CORE_PY="$CORE_ROOT/.venv/Scripts/python.exe"  # Windows；Linux/macOS 去掉 .exe 与 Scripts/
 export PYTHONPATH="$YOAI_ROOT/src;$CORE_ROOT/src"     # Linux/macOS 用冒号分隔
 ```
@@ -71,6 +83,9 @@ export PYTHONPATH="$YOAI_ROOT/src;$CORE_ROOT/src"     # Linux/macOS 用冒号分
 #   创建一个目标：完成 YoAi 原型
 #   列出我的目标
 #   列出我记住的事实
+#   在 notes 目录写一个文件 hello.txt，内容是你好
+#   读一下 notes/hello.txt
+#   搜索一下 Python 教程
 ```
 
 界面消费 Core 的 21 类事件（路由/工具调用/授权/错误/完成等），把原始事件转成
@@ -82,8 +97,13 @@ export PYTHONPATH="$YOAI_ROOT/src;$CORE_ROOT/src"     # Linux/macOS 用冒号分
 
 ## 独立 exe（可双击运行）
 
-`dist/YoAi.exe` 是单文件应用（约 81 MB），**不依赖 Python、不依赖 Core venv**，
-双击即开。个人状态保存在 exe 同目录的 `output/`，重启仍在。
+`dist/YoAi.exe` 是单文件应用（约 82 MB），**不依赖 Python、不依赖 Core venv**，
+双击即开。个人状态保存在 exe 同目录的 `output/`，重启仍在；AI 的实操工具以
+exe 同目录 `workspace/` 为根目录。
+
+> ⚠️ 打包产物必须和源码同步：改完源码要重新构建，否则双击运行的是旧代码。
+> 用自检确认产物里工具数为 **18**（12 记忆/目标 + 4 文件 + 2 联网）：
+> `selfcheck.json` 的 `tools` 少于 18 就说明 exe 是旧的。
 
 ```bash
 # 重新构建（需要 Core venv 里的 PyInstaller）
@@ -109,7 +129,7 @@ YoAi 内置社交式通讯：多个智能体作为 peer 接入同一个 `Channel
 - 防循环：只有 chat 消息触发 peer 回复，reply 不再触发；群广播排除发送者本人
 - 并发：各 peer 独立 YoAiAgent 实例（契合 Core"一实例一会话"契约），`asyncio.gather` 并行投递
 - 持久化：`output/chat/chat.json`（exe 模式为 exe 同目录），跨会话可查
-- 边界：不侵入 Core、不做对等 Multi-Agent 编排（Core 红线），只做消息路由/群状态
+- 边界：不改 Core 实现编排（当前 Core 源码零改动）、不做对等 Multi-Agent 编排，只做消息路由/群状态
 
 `python -m pytest tests/test_chat.py tests/test_chat_ui.py` 覆盖内核与 UI（详见
 [`docs/COMMUNICATION-PLAN.md`](docs/COMMUNICATION-PLAN.md)）。
@@ -265,7 +285,8 @@ agent = YoAiAgent(model=OpenAICompatProvider())
 ## 尚未实现 / 已知边界
 
 - Event & Scheduler：事件响应、周期任务、长任务中断恢复。
-- 真实工具集成：文件、终端、浏览器、桌面（Core 已有 Provider，YoAi 层待接入）。
+- 实操工具的边界：文件仅限 `workspace/`（写限白名单子目录，带作用域 gate），
+  联网仅只读的搜索/抓取（无终端、无桌面控制、无写外部系统）。
 - 弱网 / 低带宽适配、手机自动化：未做。
 - 长期记忆高级能力：语义召回、时间版本、冲突解决。
 - 进化引擎 M3（预算内候选试验）、M4（长期指标）：未实现；当前验证样本 0 条，
