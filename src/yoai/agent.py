@@ -62,10 +62,10 @@ class YoAiAgent:
         默认 False（保守，不改既有行为）；验证后再决定是否设默认。
         number_supplement: 阶段C——无条件叠加"数字+名词"事实抽取。默认 False：
         全量A/B已证不显著（63.0%→63.2%, p=1.0），仅数字密集场景按需开启。
-        memory_intent_routing: 默认 True——把"记住/我叫/我喜欢"等记忆意图导向 REACT，
-        让模型拿到工具 schema。Core 规则表漏了"记住"导致这类任务被误判 DIRECT、
-        模型吐 DSML 被拒（2026-11-24 真实生产 bug）。通过 Core 的 learning SPI 注入，
-        不改内核、Core 升级天然兼容；传 False 关闭。
+        memory_intent_routing: 默认 True——YoAi 工具优先路由：只要有工具就走 REACT
+        注入完整 schema，让模型自己决定调不调。根治 DIRECT"不给 schema 却给工具目录"
+        导致模型吐 DSML 被拒的静默失败（2026-11-24）。不再靠关键词表打地鼠。
+        继承 Core 公开 Router 类，不改内核、升级兼容；传 False 恢复纯 Core 行为。
         builtin_tools: 默认 False——是否注册实操工具（file_list/read/create/patch、
         web_search/web_fetch）。开启后 AI 能读写 项目内 workspace/ 目录 内的文件、
         访问公开网页；写操作限白名单子目录并带 Core 的 filesystem_gate。
@@ -101,11 +101,12 @@ class YoAiAgent:
         core_kwargs: dict[str, Any] = {"outcome_verifier": verifier}
         if memory is not None:
             core_kwargs["memory"] = memory
-        # YoAi 侧路由扩展：记忆写入意图走 REACT（Core 规则表漏了"记住"）。
-        # 用 Core 公开 SPI 注入，不动内核、升级兼容；False 关闭恢复纯 Core 行为。
+        # YoAi 侧路由：有工具就注入完整 schema（REACT），让模型自己决定调不调。
+        # 根治 DIRECT"不给 schema 却给工具目录"的矛盾——不再靠词表打地鼠。
+        # 继承 Core 公开类，不改内核、升级兼容；False 关闭恢复纯 Core 行为。
         if memory_intent_routing:
-            from yoai.routing import MemoryIntentSelector
-            core_kwargs["learning"] = MemoryIntentSelector()
+            from yoai.routing import YoAiRouter
+            core_kwargs["router"] = YoAiRouter()
         self.core = AgentCore(model, **core_kwargs)
         # Core 内省公开方法 → ToolSpec，注册进统一 ToolRegistry。
         self._all_tool_specs = discover(self.capabilities)

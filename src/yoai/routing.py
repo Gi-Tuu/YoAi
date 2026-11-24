@@ -1,82 +1,84 @@
-"""YoAi 侧路由扩展：Core 规则表漏掉的高置信意图导向 REACT（2026-11-24）。
+"""YoAi 侧路由：有工具就给 schema，让模型自己决定调不调（2026-11-24 根治版）。
 
-背景：
-Core 的 AdaptiveRouter 用关键词表 _ACTION_HINTS 判行动意图，但覆盖有盲区——
-- 有"记录"无"记住" → "记住我偏好X"被判 DIRECT，模型吐 DSML 被拒
-- 有"读取"无"读一下/写个文件" → 文件操作被判 DIRECT（开了 builtin_tools 后同样失败）
-DIRECT 不注入工具 schema，模型只能照 system prompt 的工具目录文本吐出 DSML，
-Core 安全防线拒绝执行 → 任务没做 + 静默错误。
+## 为什么要换掉词表补丁
 
-不改内核（内核要能跟随 Core 更新）——用 Core 已提供的 RouteSelector SPI
-（AgentCore 的 learning= 参数）在 YoAi 侧补上这些意图。
-Core 的规则/LLM 路径对其它任务完全不变。
+之前的方案是在 Core 的 `_ACTION_HINTS` 盲区上打地鼠：漏了"记住"补"记住"，
+漏了"写文件"补"写文件"——词表永远补不全，下一个动词照样静默失败。
 
-用法：YoAiAgent 构造时默认注入；传 memory_intent_routing=False 关闭。
+根因不是词表不全，是 **DIRECT 模式的设计矛盾**：
+- DIRECT 不注入工具 JSON Schema（use_tools=False）
+- 但 system prompt 仍注入工具能力目录（文本）
+- 模型看到目录、没 schema → 把调用写成正文 DSML → Core 安全防线拒绝 → 静默失败
+
+DIRECT 的收益只是省 4.2KB schema（18 工具实测）+ 一轮工具循环——
+而模型不调工具时 REACT 也就一轮，收益几乎为零，代价却是整个静默失败问题类。
+
+## 方案
+
+继承 Core 的 AdaptiveRouter（公开类，不改内核），覆盖决策方法：
+- 无工具 → 交回父类（CLARIFY / DIRECT 硬规则，能力边界优先）
+- 有工具 → 一律 REACT（含完整 schema），让模型自己决定调不调
+- 保留 CLARIFY（模糊任务仍先反问，不硬调工具）
+
+Core 升级天然兼容：只用公开 API + 继承扩展，没有改内核文件、没有 monkey patch。
+
+用法：YoAiAgent 构造时默认注入；传 memory_intent_routing=False 可关闭
+（参数名保留兼容，语义已泛化为"YoAi 自主路由"）。
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
+from yai_core.kernel.router import AdaptiveRouter, RouteDecision
 from yai_core.types import Strategy
 
-# 记忆写入意图：明确要求"把某事存下来"，必须走工具循环。
-_MEMORY_WRITE = re.compile(
-    r"(记住|记一下|记下来|请记|帮我记|别忘了|"
-    r"我叫|我喜欢|我爱|我讨厌|我偏好|我在|我住在|我来自|我有|"
-    r"我的(名字|生日|爱好|工作|家|家人|猫|狗|车|偏好))",
-    re.IGNORECASE,
-)
 
-# 记忆查询意图：这些句子里的"记住"是描述不是写入，交回 Core 规则
-# （Core 的"列出/查"已能命中 REACT）。
-_MEMORY_QUERY = re.compile(r"(列出|查询|看看|有哪些|告诉我之前|我上次说过)")
+class YoAiRouter(AdaptiveRouter):
+    """有工具时始终走 REACT，消除 DIRECT 的无 schema 矛盾。
 
-# 文件操作意图：只在 registry 有 file_* 工具时才有意义（suggest 里检查）。
-# "写/建/保存/读一下/打开看看"等 Core 规则表未覆盖的高置信文件动词。
-_FILE_OP = re.compile(
-    r"(写一个|写个|写入|保存到|新建文件|创建文件|建一个文件|"
-    r"读一下|读读|打开.*文件|文件.*内容|把.*写入|"
-    r"file_(read|create|patch|list))",
-    re.IGNORECASE,
-)
-
-
-class MemoryIntentSelector:
-    """把 Core 规则漏掉的高置信工具意图导向 REACT，其余不表态（返回 None）。
-
-    类名保留 MemoryIntentSelector 以兼容既有引用；职责已扩展到文件操作。
-    实现 Core 的 RouteSelector Protocol：
-    - suggest(): 纯本地正则匹配，零网络/零模型调用，可放路由热路径
-    - record(): 空实现——这是确定性规则，不是学习器，不消费反馈
+    继承 AdaptiveRouter 保留全部构造参数与 LLM/学习器能力；
+    只覆盖"有工具但规则想走 DIRECT"这一种决策。
     """
 
-    source = "yoai:builtin-intent"
-
-    def suggest(self, task: str, registry: Any) -> Any | None:
+    def _should_use_react(self, task: str, registry: Any) -> bool:
         text = str(task or "").strip()
-        names = set()
         try:
-            names = {s.name for s in registry.all()}
-        except Exception:  # noqa: BLE001 - registry 鸭子类型容错
-            pass
-        # 空任务/无工具是 Core 的硬规则区，不越过
-        if not text or not names:
-            return None
+            n = len(registry)
+        except Exception:  # noqa: BLE001
+            n = 0
+        if not text or n == 0:
+            return False   # 硬规则区交回父类
+        # 父类判 CLARIFY 的模糊短句仍交回父类（先反问，不硬调工具）
+        try:
+            parent = super()._rules(text, registry)
+        except Exception:  # noqa: BLE001
+            return True
+        if parent.strategy == Strategy.CLARIFY:
+            return False
+        return True
 
-        memory_hit = bool(_MEMORY_WRITE.search(text)) and not _MEMORY_QUERY.search(text)
-        # 文件意图只有装了 file_* 工具时才接管（没工具时交回 Core，避免空转）
-        has_file_tools = any(n.startswith("file_") for n in names)
-        file_hit = has_file_tools and bool(_FILE_OP.search(text))
-        if not (memory_hit or file_hit):
-            return None
+    def classify(self, task: str, registry: Any) -> Strategy:
+        if self._should_use_react(task, registry):
+            return Strategy.REACT
+        return super().classify(task, registry)
 
-        from yai_core.learning.bandit import RouteSuggestion
-        return RouteSuggestion(
-            strategy=Strategy.REACT,
-            source=self.source,
-            confidence=0.95,   # 确定性规则，非统计学习
-        )
+    async def aclassify(
+        self,
+        task: str,
+        registry: Any,
+        *,
+        discoverable: list[dict[str, str]] | None = None,
+    ) -> RouteDecision:
+        if self._should_use_react(task, registry):
+            return RouteDecision(
+                strategy=Strategy.REACT,
+                source="yoai:tools-first",
+                reason="宿主有工具，注入完整 schema 由模型自行决定（消除 DIRECT 无 schema 矛盾）",
+                tier="standard",
+            )
+        return await super().aclassify(task, registry, discoverable=discoverable)
 
-    def record(self, task: str, registry: Any, chosen: Strategy, outcome: Any) -> None:
-        return  # 规则选择器不需要反馈
+
+# 兼容旧引用：此前叫 MemoryIntentSelector，现在语义是"工具优先路由"。
+# 保留别名避免外部 import 断裂。
+MemoryIntentSelector = YoAiRouter
