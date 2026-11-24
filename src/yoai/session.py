@@ -65,6 +65,7 @@ class SessionManager:
         *,
         model_factory: Callable[[], Any],
         shared_context_dir: str | Path | None = None,
+        agent_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -72,6 +73,9 @@ class SessionManager:
         self._history_dir = self.data_dir / "history"
         self._history_dir.mkdir(parents=True, exist_ok=True)
         self._model_factory = model_factory
+        # 构造 agent 时透传的额外参数（如 builtin_tools / workspace_root）。
+        # 桌面端必须显式传，否则 session 里的 agent 用默认参数、工具开不起来。
+        self._agent_kwargs: dict[str, Any] = dict(agent_kwargs or {})
         self.shared_context_dir = Path(shared_context_dir) if shared_context_dir else self.data_dir / "shared"
         self._sessions: dict[str, Session] = {}
         self._agents: dict[str, YoAiAgent] = {}   # session_id -> 实例缓存
@@ -168,6 +172,7 @@ class SessionManager:
                 model=self._model_factory(),
                 data_dir=self.shared_context_dir,   # 个人事实/目标跨会话共享
                 memory=store,                        # 构造时传入，Core loop 才会绑定
+                **self._agent_kwargs,                # 桌面端在此注入 builtin_tools 等
             )
             self._agents[sid] = agent
 

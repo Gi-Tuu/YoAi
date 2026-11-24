@@ -10,7 +10,22 @@
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
+
+
+def _agent_kwargs(data_dir=None) -> dict:
+    """桌面端 agent 构造参数：实操工具默认开，YOAI_BUILTIN_TOOLS=0 可关。
+
+    会话里的 agent 由 SessionManager 创建，必须在这里显式传——
+    只在 main_window 的直接构造里传对 session 路径无效（2026-11-24 实测 bug）。
+    """
+    enable = os.environ.get("YOAI_BUILTIN_TOOLS", "1") != "0"
+    kwargs = {"builtin_tools": enable}
+    if data_dir is not None and enable:
+        kwargs["workspace_root"] = Path(data_dir) / "workspace"
+    return kwargs
 
 
 def _self_check() -> int:
@@ -43,7 +58,8 @@ def _self_check() -> int:
     def selfcheck_model():
         return ExpertModelProvider(DemoModel(), ExpertRouter(evo_archive), evo_archive)
 
-    sessions = SessionManager(data_dir / "sessions", model_factory=selfcheck_model)
+    sessions = SessionManager(data_dir / "sessions", model_factory=selfcheck_model,
+                              agent_kwargs=_agent_kwargs(data_dir))
     if not sessions.list_sessions():
         sessions.create("自检会话")
     agent = sessions.current_agent()
@@ -189,7 +205,8 @@ def main() -> int:
         provider, _ = _build_main_model(data_dir)
         return provider
 
-    sessions = SessionManager(data_dir / "sessions", model_factory=model_factory)
+    sessions = SessionManager(data_dir / "sessions", model_factory=model_factory,
+                              agent_kwargs=_agent_kwargs(data_dir))
     if not sessions.list_sessions():
         sessions.create("新会话")
     agent = sessions.current_agent()

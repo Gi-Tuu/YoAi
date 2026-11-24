@@ -51,6 +51,8 @@ a = Analysis(
         "yai_core.discovery",
         "yai_core.discovery.introspect",
         "yoai.agent",
+        "yoai.routing",          # 工具优先路由（2026-11-24）
+        "yoai.tools_builtin",    # 内置文件/联网工具（2026-11-24）
         "yoai.capabilities",
         "yoai.context",
         "yoai.goals",
