@@ -53,6 +53,7 @@ a = Analysis(
         "yoai.agent",
         "yoai.routing",          # 工具优先路由（2026-11-24）
         "yoai.tools_builtin",    # 内置文件/联网工具（2026-11-24）
+        "yoai.tools_shell",      # 受限终端 + open_url（2026-11-24，函数内延迟导入）
         "yoai.capabilities",
         "yoai.context",
         "yoai.goals",

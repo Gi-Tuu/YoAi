@@ -111,6 +111,11 @@ def builtin_tool_specs(root: str | Path | None = None) -> list[Any]:
     # 联网工具：两个纯函数，用 build_spec 自动出 schema。
     specs.append(build_spec(web_search))
     specs.append(build_spec(web_fetch))
+    # 基础能力（2026-11-24）：受限终端 + 系统浏览器。
+    # shell_run 不进 auto 白名单（每次弹窗确认）；open_url 只读打开 http/https。
+    from yoai.tools_shell import browser_tool_specs, shell_tool_specs
+    specs.extend(shell_tool_specs(root))
+    specs.extend(browser_tool_specs())
     return specs
 
 

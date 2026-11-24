@@ -45,11 +45,12 @@ def _agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) ->
     readonly_and_internal = {
         "all_topics", "events_between", "facts_by_tag", "list_facts", "list_goals",
         "recall_fact", "related_events", "summarize_theme",
-        "file_list", "file_read", "web_search", "web_fetch",
+        "file_list", "file_read", "web_search", "web_fetch", "open_url",
         "remember_event", "remember_fact", "create_goal", "complete_goal",
         "now", "recent_events", "list_tools",
         "file_ro_list", "file_ro_read",
-        # forget_fact / forget_event 是删除操作：不进白名单，auto 档弹窗确认
+        # forget_fact / forget_event 是删除操作、shell_run 可执行命令：
+        # 不进白名单，auto 档每次弹窗确认（默认拒绝）
     }
     kwargs["policy"] = AllowlistPolicy(allowed=readonly_and_internal, mode="auto")
     if channel is not None:
