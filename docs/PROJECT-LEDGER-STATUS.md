@@ -26,7 +26,8 @@
 | **过程/thinking可见(2026-11-24)** | 正文过程块：运行时展开 thinking+工序，DONE 后折叠成摘要（可点击回看）；thinking 由 YoAi 包装层拦截 raw_content_blocks 成自定义事件（**内核零改动**，跟随上游）；表格语法补齐；全量 **281 passed** | PROCESS-AND-THINKING-UI.md |
 | **真·流式输出(2026-11-24)** | 每轮模型输出逐字可见：provider 用 SDK stream=True（复用 Core 公开函数组装请求/parse_response，内核零改动）；agent 起 poller 并发 drain 增量成 delta 事件（20ms 轮询、不取消 Core task）；UI 每轮独立缓冲、DONE 定稿折叠；YOAI_STREAM=0 可关；真实网关单轮+两轮工具流式冒烟通过，全量 **283 passed** | STREAMING-OUTPUT.md |
 | **桌面exe流式修复(2026-11-24)** | 根因：桌面走 SuanliAdapter(讯飞 spark-x2.6)→GatewayModelProvider，第一版流式只在 Anthropic 路径、exe 未使用；修：Suanli 加 OpenAI 兼容 SSE（content/reasoning_content 增量、tool_calls 聚合），agent drain 穿透 .base+.adapter 包装链；真实网关 text/thinking 增量验证通过；**22:24 重打包 exe(57.6MB)自检通过**（22:07 首版曾有 reasoning 逐 token 裂成多行的显示 bug，已修为合并成一段）；全量 **286 passed** | STREAMING-OUTPUT.md |
-| **思考默认折叠(2026-11-24)** | 用户拍板：思考内容默认折叠，只留「▸ 查看思考过程（N字）」入口；独立锚点 yoai:think:N 与过程块折叠互不干扰；已展开时一段连续文本+收起入口；**22:38 exe 重打包自检通过**，全量 **286 passed** | STREAMING-OUTPUT.md |
+| **思考默认折叠(2026-11-24)** | 用户拍板：思考内容默认折叠，只留「▸ 查看思考过程（N字）」入口；独立锚点 yoai:think:N 与过程块折叠互不干扰；已展开时一段连续文本+收起入口；22:38 exe 重打包自检通过 | STREAMING-OUTPUT.md |
+| **过程行同行(2026-11-24)** | 截图反馈 [步骤] 标签与内容分行：md_to_html 段落块级 `<p>` 所致；加 inline=True（span）供过程行用，默认行为不变；**22:57 exe 重打包自检通过**，全量 **288 passed** | MARKDOWN-RENDERING.md |
 | 进程/单实例 | QLocalSocket单实例守卫(进程死OS自动释放，无陈旧锁)；worker的requestInterruption真cancel asyncio任务，根治关窗后YoAi.exe残留 | src/yoai/desktop/single_instance.py |
 | 权限3档 | 桌面用Core的AllowlistPolicy(auto档)：只读+记忆/目标内部写白名单自动过，文件写弹窗确认(默认拒绝/关窗一律拒绝)；Core默认CollectChannel.confirm永远True已替换；YOAI_PERMISSION_MODE=allow_all可切全放行(默认auto) | src/yoai/desktop/approval.py |
 | 500题全量 | **已完成**（2026-11-23，免费额度最后一天） | — |
