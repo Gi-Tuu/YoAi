@@ -10,7 +10,7 @@ Core 是嵌入式自适应内核（规划 / 工具 / 治理 / 事件流），YoA
 >
 > | 能力 | 状态 | 依据 |
 > |---|---|---|
-> | 桌面窗口 / 离线演示模型 | 可用 | 219 项测试 + Qt 自渲染截图 + exe 自检 |
+> | 桌面窗口 / 离线演示模型 | 可用 | 224 项测试 + Qt 自渲染截图 + exe 自检 |
 > | 真实模型接入（讯飞 spark-x2.6 / 百度百炼） | 可用 | 端到端实测，见 `docs/MODEL-GATEWAY-CANDIDATES.md` |
 > | 个人事实 / 长期目标 / 会话持久化 | 可用 | 单测覆盖 |
 > | 通讯协作（阶段 A/B/C，含外部智能体分级接入） | 可用 | 离线三智能体 + 真接入分级标注 |
@@ -121,6 +121,10 @@ exe 同目录 `workspace/` 为根目录。
 白名单 = 只读工具 + 记忆/目标内部写入；**文件写（`file_create` / `file_patch`）必须弹窗确认**。
 弹窗默认选中"拒绝"（失败关闭）；关窗时所有等待中的审批一律拒绝，绝不放行。
 实现见 `src/yoai/desktop/approval.py`。
+
+> 想临时免弹窗（信任环境/测试）：启动前设环境变量 `YOAI_PERMISSION_MODE=allow_all`
+> 即切回 `allow_all` 全放行；不设则默认 `auto`。exe 是 GUI 程序，环境变量需在
+> 启动它的进程里设（例如从命令行 `set YOAI_PERMISSION_MODE=allow_all && YoAi.exe`）。
 
 ```bash
 # 重新构建（需要 Core venv 里的 PyInstaller）
