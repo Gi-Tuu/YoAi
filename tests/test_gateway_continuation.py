@@ -33,12 +33,14 @@ class _FakeAdapter:
 
 
 def test_stall_patterns():
-    from yoai.models.gateway_provider import GatewayModelProvider as G
+    # 正则已提取到共享模块 yoai.models.stall（GatewayModelProvider 与
+    # CoreAnthropicModelProvider 共用同一检测），行为不变。
+    from yoai.models.stall import STALL_RE
     yes = ["好的，我去查一下。", "我去查一下", "让我看看", "稍等",
            "我来试试看", "嗯，我先看看"]
     no = ["查完了：目前记住0条。", "抱歉无法访问", "已经记住了，你叫小明", "你好"]
-    assert all(G._STALL_RE.match(s) for s in yes)
-    assert all(not G._STALL_RE.match(s) for s in no)
+    assert all(STALL_RE.match(s) for s in yes)
+    assert all(not STALL_RE.match(s) for s in no)
 
 
 def test_stall_triggers_reask_then_tool():

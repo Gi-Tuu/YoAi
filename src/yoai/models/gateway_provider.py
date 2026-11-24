@@ -15,32 +15,18 @@ usage 如实透传（拿不到就 None）；同步 HTTP 放 asyncio.to_thread �
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Any
 
 from yai_core.types import ModelResponse, TokenUsage, ToolCallRequest
 
 from yoai.adapters.base import PeerAdapter
+from yoai.models.stall import STALL_NUDGE, is_stall_text
 
 
 class GatewayModelProvider:
     """把 PeerAdapter 包装成 Core ModelProvider（工具模式优先，纯文本降级）。"""
 
     yai_multimodal = False   # 纯文本接口，不声明多模态
-
-    # 过渡语检测：模型偶尔只说"我要去做"而不真的调工具，Core 会把这句当最终答案
-    # （纯文本 = 结束），用户看到"他说去查但没结果"（2026-11-24 真实生产问题）。
-    # 只匹配明确的行动承诺元话语，且整段很短——长回答里的"我会尽快查询"不算。
-    _STALL_RE = re.compile(
-        r"^\s*(好的|行|嗯|收到|明白|ok)?[，,。\s]*"
-        r"(我(去|来|马上|这就|现在|先)?"
-        r"(查|看|试|找|确认|检查|调用|执行|弄|办|处理|看看|查查|试试|找找|试试看)"
-        r"(一下|一查|看|吧|咯|嘛)?|"
-        r"让(我|俺)(看看|查查|试试|找找)|稍等|等一下|请稍候)"
-        r"[。！!~\s…]*$",
-        re.IGNORECASE,
-    )
-    _STALL_NUDGE = "请直接调用工具执行，不要只描述你要做什么，然后给出最终结果。"
 
     def __init__(self, adapter: PeerAdapter, *, include_system: bool = True,
                  reask_on_stall: bool = True) -> None:
@@ -113,16 +99,16 @@ class GatewayModelProvider:
 
         # 纯文本 + 有工具 + 是"我去查一下"这类过渡语 → Core 会当最终答案结束，
         # 任务还没执行。追加一次明确指令重试（最多一次，防循环）。
-        if not self._STALL_RE.match(response.content or ""):
+        if not is_stall_text(response.content or ""):
             return response
         nudge_messages = list(messages) + [
             {"role": "assistant", "content": response.content},
-            {"role": "user", "content": self._STALL_NUDGE},
+            {"role": "user", "content": STALL_NUDGE},
         ]
         retried, failed2 = await self._ask_once(nudge_messages, tools)
         # 重试仍失败/仍是过渡语 → 返回原响应，不无限纠缠
         if failed2 or (not retried.tool_calls
-                       and self._STALL_RE.match(retried.content or "")):
+                       and is_stall_text(retried.content or "")):
             return response
         return retried
 

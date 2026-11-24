@@ -175,17 +175,23 @@ def _build_main_model(data_dir=None):
     """
     from yoai.demo_model import DemoModel
     from yoai.models import (
-        SuanliAdapter, DeepSeekAnthropicAdapter, GatewayModelProvider,
-        ExpertModelProvider,
+        SuanliAdapter, GatewayModelProvider, ExpertModelProvider,
+    )
+    from yoai.models.core_anthropic_provider import (
+        CoreAnthropicModelProvider, core_anthropic_available,
     )
     from yoai.evolution import EvolutionArchive, ExpertRouter, ExpertSpec
 
     base = None
-    for adapter_cls in (SuanliAdapter, DeepSeekAnthropicAdapter):
-        adapter = adapter_cls()
-        if adapter.available():
-            base = GatewayModelProvider(adapter)
-            break
+    adapter = SuanliAdapter()
+    if adapter.available():
+        # OpenAI 兼容网关：仍走自写适配器桥接
+        base = GatewayModelProvider(adapter)
+    elif core_anthropic_available():
+        # Anthropic 兼容网关（DeepSeek）：走 Core 官方 AnthropicProvider。
+        # 协议翻译/thinking 回传/prompt cache 由 Core 维护；异常降级与
+        # stall 重试由 CoreAnthropicModelProvider 包装保留（2026-11-24 迁移）。
+        base = CoreAnthropicModelProvider()
     if base is None:
         base = DemoModel()
 

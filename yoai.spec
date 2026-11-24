@@ -83,6 +83,18 @@ a = Analysis(
         "yoai.models.suanli_adapter",
         "yoai.models.gateway_provider",
         "yoai.models.expert_provider",
+        "yoai.models.core_anthropic_provider",  # Core 官方 AnthropicProvider 包装（2026-11-24 迁移）
+        "yoai.models.stall",                    # 过渡语检测（Gateway/Core 两 provider 共用）
+        "yai_core.llm",                         # Core 模型后端
+        "yai_core.llm.anthropic",               # CoreAnthropicModelProvider 懒加载目标
+        "anthropic",                            # Anthropic SDK（yai_core.llm.anthropic 函数内懒加载）
+        "httpx",                                # anthropic SDK 传输层
+        "httpcore",
+        "h11",
+        "anyio",
+        "sniffio",
+        "distro",
+        "jiter",
         "yoai.evolution",
         "yoai.evolution.models",
         "yoai.evolution.archive",
