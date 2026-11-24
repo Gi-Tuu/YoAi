@@ -51,6 +51,7 @@ class YoAiAgent:
         tool_filter: Any = None,
         memory_fallback: bool = False,
         number_supplement: bool = False,
+        memory_intent_routing: bool = True,
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
         过滤可用工具（专家白名单接线）。None 或返回 None 表示不限制。默认不启用，
@@ -58,7 +59,11 @@ class YoAiAgent:
         memory_fallback: 阶段B——模型本轮一个记忆都没写时，是否用确定性规则兜底。
         默认 False（保守，不改既有行为）；验证后再决定是否设默认。
         number_supplement: 阶段C——无条件叠加"数字+名词"事实抽取。默认 False：
-        全量A/B已证不显著（63.0%→63.2%, p=1.0），仅数字密集场景按需开启。"""
+        全量A/B已证不显著（63.0%→63.2%, p=1.0），仅数字密集场景按需开启。
+        memory_intent_routing: 默认 True——把"记住/我叫/我喜欢"等记忆意图导向 REACT，
+        让模型拿到工具 schema。Core 规则表漏了"记住"导致这类任务被误判 DIRECT、
+        模型吐 DSML 被拒（2026-11-24 真实生产 bug）。通过 Core 的 learning SPI 注入，
+        不改内核、Core 升级天然兼容；传 False 关闭。"""
         data_dir = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
         self.context = PersonalContext(data_dir / "context.json")
         self.goals = GoalManager(data_dir / "goals.json")
@@ -89,6 +94,11 @@ class YoAiAgent:
         core_kwargs: dict[str, Any] = {"outcome_verifier": verifier}
         if memory is not None:
             core_kwargs["memory"] = memory
+        # YoAi 侧路由扩展：记忆写入意图走 REACT（Core 规则表漏了"记住"）。
+        # 用 Core 公开 SPI 注入，不动内核、升级兼容；False 关闭恢复纯 Core 行为。
+        if memory_intent_routing:
+            from yoai.routing import MemoryIntentSelector
+            core_kwargs["learning"] = MemoryIntentSelector()
         self.core = AgentCore(model, **core_kwargs)
         # Core 内省公开方法 → ToolSpec，注册进统一 ToolRegistry。
         self._all_tool_specs = discover(self.capabilities)
