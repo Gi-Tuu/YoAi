@@ -28,6 +28,17 @@
 - ~~#10 thinking 本地绕法~~：**不再需要**——主对话已迁到 Core 官方 AnthropicProvider，
   thinking 块回传自动生效；见 MODEL-MIGRATION-CORE-ANTHROPIC.md
 
+### 2026-11-24 晚 · 产品能力补全（已完成，从计划移出）
+
+- 工具热加载（旧会话不重启 + 插件目录 mtime 加载）
+- 基础实操：`shell_run` 受限终端（审批弹窗）+ `open_url` 系统浏览器
+- 消息 Markdown 渲染（含表格；先转义后解析防注入）
+- 执行过程/thinking 正文可见 + DONE 后折叠（可展开回看）
+- 真·token 流式输出（Anthropic 与桌面 Suanli SSE 两条路径均验证；`YOAI_STREAM=0` 回退）
+- 思考碎片合并成一段 + 默认折叠只留入口
+- 全部文档见 `TERMINAL-AND-BROWSER.md` / `MARKDOWN-RENDERING.md` /
+  `PROCESS-AND-THINKING-UI.md` / `STREAMING-OUTPUT.md`；总览第九节已同步
+
 ## 维护约定
 
 - 完成一项 → 从本表移除或标完成，结果写进状态台账对应行。
