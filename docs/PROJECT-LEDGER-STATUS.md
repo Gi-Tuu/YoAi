@@ -18,7 +18,8 @@
 | 生产网关(2026-11-24) | 算里死key→**讯飞 spark-x2.6**(10亿token/31天)：tool_calls完美、串行12/12=100%稳定、2.4s/次；Core .env已切，备份.env.bak-20261124-010247 | 本机Core/.env |
 | 生产工具集 | **18个**：12记忆/目标 + 4文件(file_list/read/create/patch) + 2联网(web_search/fetch)；文件工具用Core现成电池+gate，读全workspace/、写限白名单子目录 | PRODUCTION-TOOL-SILENT-FAILURE.md |
 | 生产问题修复 | ①DIRECT静默失败→工具优先路由(YoAiRouter) ②UI错误可见 ③实操工具 ④过渡语停住→适配层re-ask；均YoAi侧不改内核 | PRODUCTION-STALL-REASK.md 等 |
-| 桌面exe(2026-11-24) | **17:36重新打包** `dist/YoAi.exe`(57.4MB，含模型迁移+UI发送按钮重构)，自检确认18工具/SELFCHECK_OK；单实例+干净退出已验 | MODEL-MIGRATION-CORE-ANTHROPIC.md |
+| **工具扩展(2026-11-24)** | YoAi 自检反馈五项能力落地：now 时间源 / forget_fact+forget_event+recent_events 删除 / file_ro_list+file_ro_read 只读挂载(YOAI_READONLY_ROOTS) / list_tools 自省 / request_capability 接线；删除类不进 auto 白名单（弹窗）；全量 **249 passed**，CI 绿，exe 18:40 重打包自检通过 | SELF-REPORT-TOOLS-2026-11-24.md |
+| 桌面exe(2026-11-24) | **18:40重新打包** `dist/YoAi.exe`(57.6MB，含工具扩展+模型迁移)，自检 SELFCHECK_OK（只读挂载默认关，设 YOAI_READONLY_ROOTS 后生效） | SELF-REPORT-TOOLS-2026-11-24.md |
 | 进程/单实例 | QLocalSocket单实例守卫(进程死OS自动释放，无陈旧锁)；worker的requestInterruption真cancel asyncio任务，根治关窗后YoAi.exe残留 | src/yoai/desktop/single_instance.py |
 | 权限3档 | 桌面用Core的AllowlistPolicy(auto档)：只读+记忆/目标内部写白名单自动过，文件写弹窗确认(默认拒绝/关窗一律拒绝)；Core默认CollectChannel.confirm永远True已替换；YOAI_PERMISSION_MODE=allow_all可切全放行(默认auto) | src/yoai/desktop/approval.py |
 | 500题全量 | **已完成**（2026-11-23，免费额度最后一天） | — |
