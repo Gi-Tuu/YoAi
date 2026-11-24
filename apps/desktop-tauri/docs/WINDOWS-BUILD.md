@@ -44,14 +44,27 @@ Tauri 会拉起 Python runtime 子进程，握手 `hello`/`ready` 后即可发�
    ```json
    "resources": ["resources/python", "resources/runtime"]
    ```
-4. 构建：
+4. **MSVC 环境（关键，否则 `link: extra operand`）**：Windows 上 Git Bash 自带 GNU
+   `link.exe`（coreutils），会抢占 PATH 让 rustc 调错链接器。必须用 PowerShell 先注入
+   VC 环境：
+   ```powershell
+   cd apps/desktop-tauri
+   .\scripts\build-env.ps1 -Build     # 注入 vcvars64 + 直接构建
+   # 或只设环境：.\scripts\build-env.ps1，然后在同一会话跑 npm run tauri build
+   ```
+   前提：已装 **VS Build Tools + C++ 构建工具 workload**（`winget install
+   Microsoft.VisualStudio.2022.BuildTools --override "--wait --quiet --add
+   Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`）。
+   脚本会验证 `link.exe` 确实来自 Visual Studio，否则直接报错。
+
+5. 构建（仅当已在正确的 MSVC 环境里）：
    ```bash
    cd apps/desktop-tauri
    npm run build
    npm run tauri build
-   # 或：node scripts/build-windows.mjs
+   # 或：node scripts/build-windows.mjs（不注入 MSVC 环境，需先跑 build-env.ps1）
    ```
-5. 产物：`src-tauri/target/release/bundle/msi/` 与 `nsis/`。
+6. 产物：`src-tauri/target/release/bundle/msi/` 与 `nsis/`。
 
 `scripts/build-windows.mjs` 会检查嵌入式 Python 是否存在并给出警告，避免
 静默产出跑不起来的安装包。
