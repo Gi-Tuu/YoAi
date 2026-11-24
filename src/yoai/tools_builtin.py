@@ -112,3 +112,70 @@ def builtin_tool_specs(root: str | Path | None = None) -> list[Any]:
     specs.append(build_spec(web_search))
     specs.append(build_spec(web_fetch))
     return specs
+
+
+def readonly_tool_specs(roots: list[str | Path]) -> list[Any]:
+    """只读挂载扩展目录（2026-11-24，YoAi 自检反馈）。
+
+    场景：AI 调试宿主项目时需要读项目源码，而 file_* 工具
+    的根是 workspace/，Core 电池按设计拒绝盘符绝对路径（PathEscapeError）。
+    这里在 **YoAi 侧**提供第二个只读入口：file_ro_read / file_ro_list，
+    路径 resolve 后必须落在白名单根内（跟随符号链接也会被 resolve 排除），
+    写类操作不存在（没有 create/patch），不改 Core 内核、升级兼容。
+
+    roots 为空或全部不存在时不挂载，返回空列表（行为与旧版一致）。
+    """
+    allowed = [Path(r).expanduser().resolve() for r in roots or []]
+    allowed = [r for r in allowed if r.is_dir()]
+    if not allowed:
+        return []
+
+    def _resolve_in_roots(path: str) -> Path:
+        raw = Path(str(path)).expanduser()
+        if not raw.is_absolute():
+            # 相对路径按白名单根逐个尝试（模型通常以根内相对路径表述）
+            for root in allowed:
+                candidate = (root / raw).resolve()
+                if candidate.exists() and (candidate == root or candidate.is_relative_to(root)):
+                    return candidate
+        p = raw.resolve()
+        for root in allowed:
+            if p == root or p.is_relative_to(root):
+                return p
+        raise PermissionError(
+            f"路径不在只读白名单内（允许的根：{', '.join(str(r) for r in allowed)}）：{path}"
+        )
+
+    def file_ro_list(path: str = "") -> str:
+        """列出只读挂载目录下的一级内容（子目录名/ 与文件名）。
+        path 为空时列各白名单根的顶层。只读，不能写。"""
+        import json as _json
+        if not str(path).strip():
+            listing = {}
+            for root in allowed:
+                listing[str(root)] = sorted(
+                    (c.name + ("/" if c.is_dir() else "")) for c in root.iterdir()
+                )
+            return _json.dumps(listing, ensure_ascii=False)
+        p = _resolve_in_roots(path)
+        if not p.is_dir():
+            return f"不是目录：{path}"
+        return _json.dumps(
+            sorted((c.name + ("/" if c.is_dir() else "")) for c in p.iterdir()),
+            ensure_ascii=False,
+        )
+
+    def file_ro_read(path: str, max_chars: int = 20000) -> str:
+        """读取只读挂载目录内一个文本文件的内容（源码/文档/配置）。
+        max_chars 限制返回长度（上限 50000）；二进制文件会如实报错。只读，不能写。"""
+        max_chars = max(500, min(50000, int(max_chars)))
+        p = _resolve_in_roots(path)
+        if not p.is_file():
+            return f"不是文件：{path}"
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return f"读取失败：{type(exc).__name__}: {exc}"
+        return text[:max_chars]
+
+    return [build_spec(file_ro_list), build_spec(file_ro_read)]

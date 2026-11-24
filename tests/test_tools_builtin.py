@@ -28,7 +28,9 @@ def test_tool_registration(tmp_path):
     added = set(on.list_tools()) - set(off.list_tools())
     assert {"file_list", "file_read", "file_create", "file_patch",
             "web_search", "web_fetch"}.issubset(added)
-    assert len(off.list_tools()) == 12   # 默认不引入实操工具
+    # off = 12 原有能力 + 4 新增（now/forget_fact/recent_events/forget_event，
+    # 2026-11-24）+ 2 常驻 meta（list_tools/request_capability）
+    assert len(off.list_tools()) == 18
 
 
 def test_file_write_read_and_gate(tmp_path):

@@ -45,6 +45,18 @@ class PersonalCapabilities:
         """列出全部已记住的个人事实。"""
         return self._context.list_all()
 
+    def forget_fact(self, key: str) -> str:
+        """删除一条已记住的个人事实（按键名精确匹配）。删除不可恢复；
+        键名不确定时先用 list_facts 查准确键名。"""
+        removed = self._context.forget(key)
+        return f"已删除：{key}" if removed else f"没有名为 {key} 的事实（先用 list_facts 查）"
+
+    def now(self) -> str:
+        """当前本地时间（ISO 8601 带时区）。给事件打 event_time、排序、
+        算"多久之前"都需要先取这个真实时钟，不要自己猜时间。"""
+        from datetime import datetime
+        return datetime.now().astimezone().isoformat(timespec="seconds")
+
     # --- Goal Manager 工具 ---
     def create_goal(self, title: str, steps: list[str] | None = None) -> str:
         """创建一个长期目标，可附带步骤列表，返回目标 id。"""
@@ -98,3 +110,20 @@ class PersonalCapabilities:
     def all_topics(self) -> list[str]:
         """列出所有已知主题，帮助发现该查什么。"""
         return [] if self._tmem is None else self._tmem.all_topics()
+
+    def recent_events(self, n: int = 10) -> list[dict[str, Any]]:
+        """最近 n 条事件（新的在前）。删除前先用它核对事件的准确原文。"""
+        if self._tmem is None:
+            return []
+        return self._tmem.recent_events(n)
+
+    def forget_event(self, what: str, tag: str = "") -> str:
+        """删除一条已记住的事件（按 what 原文精确匹配，tag 可选收窄）。
+        删除不可恢复；what 必须用 recent_events / facts_by_tag 查到的准确原文，
+        不要凭记忆改写。"""
+        if self._tmem is None:
+            return "时间记忆未启用"
+        count = self._tmem.forget(what, tag=tag)
+        if count == 0:
+            return "没有精确匹配的事件（先用 recent_events / facts_by_tag 查准确原文）"
+        return f"已删除 {count} 条匹配事件"

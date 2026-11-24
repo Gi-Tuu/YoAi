@@ -25,6 +25,13 @@ def _agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) ->
     kwargs = {"builtin_tools": enable}
     if data_dir is not None and enable:
         kwargs["workspace_root"] = Path(data_dir) / "workspace"
+    # 只读挂载扩展目录（AI 调试宿主项目用）：YOAI_READONLY_ROOTS，路径分隔符
+    # 用 os.pathsep（Windows 是分号）。默认不挂载，行为与旧版一致。
+    readonly_raw = os.environ.get("YOAI_READONLY_ROOTS", "").strip()
+    if readonly_raw and enable:
+        roots = [r for r in (s.strip() for s in readonly_raw.split(os.pathsep)) if r]
+        if roots:
+            kwargs["readonly_roots"] = roots
 
     # 权限档位（Core 三档 allow_all / auto / deny_all）：
     # - 默认 auto：白名单内放行，文件写等白名单外工具弹窗确认
@@ -40,6 +47,9 @@ def _agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) ->
         "recall_fact", "related_events", "summarize_theme",
         "file_list", "file_read", "web_search", "web_fetch",
         "remember_event", "remember_fact", "create_goal", "complete_goal",
+        "now", "recent_events", "list_tools",
+        "file_ro_list", "file_ro_read",
+        # forget_fact / forget_event 是删除操作：不进白名单，auto 档弹窗确认
     }
     kwargs["policy"] = AllowlistPolicy(allowed=readonly_and_internal, mode="auto")
     if channel is not None:

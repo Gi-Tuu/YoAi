@@ -127,6 +127,33 @@ class TemporalMemory:
         """按主题聚合某类事实（跨会话汇总用）。"""
         return [e for e in self._events if e["tag"] == tag]
 
+    def forget(self, what: str, *, tag: str = "") -> int:
+        """删除匹配的事件/事实，返回删除条数（0=没有匹配）。
+
+        what **精确匹配** what 字段（模型应先 list_facts / facts_by_tag 拿到
+        准确原文再删，避免误删）。tag 可选进一步收窄；删除不可恢复。
+        """
+        needle = str(what).strip()
+        if not needle:
+            return 0
+        matched = [
+            e for e in self._events
+            if e.get("what") == needle and (not tag or e.get("tag") == tag)
+        ]
+        if not matched:
+            return 0
+        self._events = [e for e in self._events if e not in matched]
+        self._save()
+        return len(matched)
+
+    def recent_events(self, n: int = 10) -> list[dict[str, Any]]:
+        """最近 n 条事件（按记录时间倒序），删除前核对精确原文用。"""
+        try:
+            limit = max(1, min(50, int(n)))
+        except (TypeError, ValueError):
+            limit = 10
+        return list(reversed(self._events[-limit:]))
+
     def timeline(self) -> list[dict[str, Any]]:
         """返回按事件发生时间排序的完整时间线。"""
         return sorted(self._events, key=lambda e: e["event_time"])

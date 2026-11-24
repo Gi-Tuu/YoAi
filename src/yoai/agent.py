@@ -54,6 +54,7 @@ class YoAiAgent:
         memory_intent_routing: bool = True,
         builtin_tools: bool = False,
         workspace_root: str | Path | None = None,
+        readonly_roots: list[str | Path] | None = None,
         channel: Any = None,
         policy: Any = None,
     ) -> None:
@@ -120,13 +121,43 @@ class YoAiAgent:
         # 实操工具（文件/联网）：Core 公开 API 注册，内核零改动、升级兼容。
         # 默认关闭，验证后再决定是否设默认。
         if builtin_tools:
-            from yoai.tools_builtin import builtin_tool_specs
+            from yoai.tools_builtin import builtin_tool_specs, readonly_tool_specs
             self._all_tool_specs = self._all_tool_specs + builtin_tool_specs(
                 workspace_root
             )
+            # 只读挂载扩展目录（如宿主项目源码，供 AI 调试宿主自己）：
+            # 仅 file_ro_list / file_ro_read，路径必须落在白名单根内，无写类操作。
+            if readonly_roots:
+                self._all_tool_specs = self._all_tool_specs + readonly_tool_specs(
+                    readonly_roots
+                )
+        # meta 工具（常驻，2026-11-24 YoAi 自检反馈）：
+        # - list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
+        # - request_capability：Core 现成实现，模型发现缺工具时显式声明能力缺口，
+        #   内核拦截处理（handler 由 loop 接管，不会真的执行 _unreachable）。
+        self._all_tool_specs.append(self._build_list_tools_spec())
+        from yai_core.tools.meta import build_request_capability_tool
+        self._all_tool_specs.append(build_request_capability_tool())
         self.core.register_tools(self._all_tool_specs)
         self.tool_filter = tool_filter
         self._active_whitelist: set[str] | None = None
+
+    def _build_list_tools_spec(self) -> Any:
+        """构造 list_tools 工具：运行时读 _all_tool_specs，如实反映当前工具表。"""
+        import json
+
+        from yai_core import build_spec
+
+        def list_tools() -> str:
+            """列出当前会话可用的全部工具（名称+一句话描述）。
+            不确定自己能做什么、或找不到想要的工具时先调用它，不要靠猜。"""
+            return json.dumps(
+                [{"name": s.name, "description": (s.description or "").strip()}
+                 for s in self._all_tool_specs],
+                ensure_ascii=False, indent=1,
+            )
+
+        return build_spec(list_tools)
 
     def _apply_tool_filter(self, task: str) -> None:
         """按 tool_filter 结果就地重建工具表；保持 core 与 loop 共享的 registry 引用不变。
