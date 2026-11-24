@@ -196,23 +196,29 @@ YoAi 内置社交式通讯：多个智能体作为 peer 接入同一个 `Channel
 
 ## 真实模型工具调用
 
-真实模型（DeepSeek / 算里）现在能**自己决定调用个人工具**：
+真实模型能**自己决定调用工具**，当前共 18 个（12 记忆/目标 + 4 文件 + 2 联网）：
 - 适配器透传 Core 的工具 schema 与完整对话（含 tool 结果轮），解析 `tool_calls` / `tool_use` 块；
 - `GatewayModelProvider` 把结果转成 Core 的 `ToolCallRequest`，工具循环由 Core 统一治理；
-- 实测：算里调用 `remember_fact(城市=杭州)`、DeepSeek 调用 `remember_fact(宠物名字=旺财)`，
-  落盘确认。
-- 边界：路由选 direct 时不给模型工具（Core 规则），多步骤任务会选 plan/react 触发工具调用。
+- **工具优先路由**（`src/yoai/routing.py`）：有工具就一律注入完整 schema，让模型自己判断调不调。
+  不再靠关键词表猜意图——旧做法会漏词导致"模型吐协议文本被拒"的静默失败（见
+  `docs/PRODUCTION-TOOL-SILENT-FAILURE.md`）。
+- **过渡语兜底**：模型若只说"我去查一下"却没真调工具，适配层自动追问一次再执行，
+  不会把过渡语当最终答案（见 `docs/PRODUCTION-STALL-REASK.md`）。
+- 历史实测（2026-11-21）：算里调用 `remember_fact(城市=杭州)`、DeepSeek 调用
+  `remember_fact(宠物名字=旺财)`，落盘确认。
 
-## 真实模型接入（已验证 · 2026-11-21）
+## 真实模型接入（当前：讯飞 · 2026-11-24）
 
-YoAi 主对话与群聊 peer 都能用真实模型，走 HTTP 网关（绕开被沙箱拦的 CLI 子进程）：
+YoAi 主对话与群聊 peer 都走 HTTP 网关（绕开被沙箱拦的 CLI 子进程）。
+网关配置统一读 Core `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `LLM_MODEL`：
 
-- **DeepSeek (Anthropic)**：环境变量 `ANTHROPIC_BASE_URL` / `AUTH_TOKEN` / `MODEL`
-  → `api.deepseek.com/anthropic`，实测 HTTP 200 + 真实回答（跳过 thinking 块取 text）。
-- **算里 DeepSeek**：Core `.env` 的 `OPENAI_BASE_URL` / `API_KEY` / `LLM_MODEL`
-  → `api.suanli.cn/v1`，实测 HTTP 200 + 真实回答。
+- **当前生产**：讯飞星辰 `spark-x2.6`（10 亿 token / 31 天，串行 12/12 稳定，
+  tool_calls 实测完美）——`https://maas-api.cn-huabei-1.xf-yun.com/v2`。
+- **可切换**：百度百炼（DeepSeek 同款模型，评测口径，16 并发稳定）；
+  Groq / OpenRouter / DeepSeek 等兼容端点见 `docs/MODEL-GATEWAY-CANDIDATES.md`。
+- 历史：算里 key 已于 2026-11-24 到期（401），不再可用；DeepSeek Anthropic 端点曾实测通过。
 
-两者 key 只在内存使用，不回显/不写盘/不进结果，usage 透传给预算。
+key 只在内存使用，不回显/不写盘/不进结果，usage 透传给预算。
 
 主对话接法（一行换模型）：
 ```python
