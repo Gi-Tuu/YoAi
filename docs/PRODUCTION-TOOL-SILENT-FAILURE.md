@@ -36,8 +36,10 @@
 ## 为什么昨天的"tool_calls 完美适配"结论错了
 
 昨天用 `tool_choice="required"` + 简单 system prompt + 1 个工具直接调 API——
-那是**最容易成功的条件**。生产实际是 12 个工具 + 路由决定不给 schema + 多轮上下文，
+那是**最容易成功的条件**。生产实际是当时 12 个工具 + 路由决定不给 schema + 多轮上下文，
 模型走的是完全不同的协议（DSML）。测了理想条件就下结论，误导了判断。
+
+> 工具数已随 ① 实操工具增加到 18 个（12 记忆/目标 + 4 文件 + 2 联网）。
 
 ## 修复（方案 B：Core SPI 扩展，不改内核）
 
@@ -109,9 +111,30 @@
   - 写工具挂 gate：越界写被拒（实测 "outside.txt 不在允许的写作用域 ['notes/'] 内"）
   - 大小上限 / 符号链接防护用 Core 保守默认值
 - 联网：`web_search`（freeserp.ai 无 key）+ `web_fetch`（仅 https、超时、长度限制）
-- 路由扩展 `_FILE_OP` 补上 Core 规则表漏掉的"写一个文件/读一下"等意图，避免再次 DIRECT 静默失败
+- 路由由后面的**工具优先路由**根治（词表补丁已废弃，见文首演进章节）
 - 桌面端默认开（`YOAI_BUILTIN_TOOLS=0` 可关），CLI 默认关
-- **端到端验证**：真实模型（讯飞）写文件→读回，零错误、文件真实落盘；208 passed
+- **端到端验证**：真实模型（讯飞）写文件→读回，零错误、文件真实落盘
 
 > 安全边界按你的选择：workspace/ 为根、写限白名单子目录、联网一起加。
 > 工具能力是"内部大胆、外部谨慎"——写有 gate、联网只读、失败如实返回错误文本。
+
+## 交付产物坑：exe 没更新 + session 路径遗漏（2026-11-24 末）
+
+上面所有"验证通过"当时都是**跑源码**（`PYTHONPATH` 指向 `src/`），而用户实际用的是
+`dist/YoAi.exe`——它的时间是 01:57，比当天 12:31–13:07 的源码修复早 11 小时，
+**用户用的打包快照里一个修复都没有**。用户一句"是不是 exe 没更新"点破。
+
+重新打包（`yoai.spec` 加 `yoai.routing` / `yoai.tools_builtin` 到 hiddenimports）后，
+跑 exe 自检（`YoAi.exe --self-check`）又发现**仍只有 12 个工具**——更深的 bug：
+
+- 桌面真实走 `SessionManager.current_agent()` 建 agent，用默认参数 `builtin_tools=False`
+- 之前只在 `main_window` 的**直接构造**处开了开关，对 session 路径无效
+- 修复（`e0a279c`）：`SessionManager` 加 `agent_kwargs` 透传；app.py 两个 SessionManager
+  构造点（主程序 + 自检）都显式传 `_agent_kwargs`（默认开、`workspace_root` 指向
+  数据目录下 workspace/、`YOAI_BUILTIN_TOOLS=0` 可关）
+
+**最终验证**：13:25 重新打包的 exe，`--self-check` 输出 **18 个工具**
+（`file_list/read/create/patch` + `web_search/fetch` 全在）；源码 212 passed。
+
+**教训（已写入项目日志）**：改完源码必须验证**用户实际运行的产物**（exe），
+不能只跑源码测试。exe 自检 `--self-check` 是验证打包产物的关键手段。
