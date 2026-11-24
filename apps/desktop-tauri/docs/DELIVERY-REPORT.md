@@ -61,7 +61,7 @@
 | Runtime 真握手 | `ready` + 26 个真实工具（含 shell_run/open_url） |
 | Runtime 真任务 | "1+1" → final "2" → done，事件 seq 0..51 完整 |
 | Tauri Rust 原生编译 | ✅ **通过**：`cargo build --release` EXIT=0（33.29s），exe 9.8MB 生成。`src-tauri/target/release/yoai-desktop-tauri.exe` |
-| Tauri 完整打包（msi/nsis） | 🟡 验证中（WiX/NSIS 首次下载） |
+| Tauri 完整打包 | ✅ **MSI 成功**：`YoAi_0.1.0_x64_en-US.msi`（3.3M）由 WiX 生成；NSIS 首次下载遇 TLS 中断（网络抖动），可重试，非代码问题 |
 
 ## 四、性能对照（jsdom 前端层实测）
 
