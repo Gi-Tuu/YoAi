@@ -135,10 +135,20 @@ class YoAiAgent:
                 resolved = 180.0     # 环境变量填错不致命，回退安全默认
         else:
             resolved = model_timeout
+        # 工具 schema 聚焦预算：Core 默认 24，超出后会让模型先做一次"只输出工具名
+        # JSON 数组"的聚焦调用。推理模型（spark-x2.6）会把这个子任务误当成主任务，
+        # 之后在正文里输出工具名数组而不是真正发 tool_calls（2026-11-25 实测：
+        # 项目模式 30 工具触发聚焦 → 写文件全失败 + [object Object] 乱码）。
+        # 调大预算让全部 schema 一次注入，跳过聚焦；内核零改动、公开构造参数。
+        try:
+            focus_budget = int(os.environ.get("YOAI_SCHEMA_BUDGET", "64").strip())
+        except ValueError:
+            focus_budget = 64
         core_kwargs: dict[str, Any] = {
             "outcome_verifier": verifier,
             "discovery": StaticCatalog([]),   # 空目录：允许声明缺口，不动态加工具
             "model_timeout": resolved,
+            "full_schema_budget": focus_budget,
         }
         # 实操工具（文件/联网）：Core 公开 API 注册，内核零改动、升级兼容。
         if memory is not None:

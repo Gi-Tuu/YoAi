@@ -124,3 +124,20 @@ def test_write_tools_respect_permission_levels(tmp_path):
 
     apply_permission_level(p, "manual")
     assert asyncio.run(p.check("proj_write", {})) == PD.ASK
+
+
+def test_schema_budget_avoids_tool_focus_for_project_mode(monkeypatch, tmp_path):
+    """推理模型（spark-x2.6）在 Core 工具聚焦阶段会把"只输出工具名 JSON 数组"
+    误当主任务，之后正文输出 [object Object] 而非真 tool_calls（2026-11-25 实测）。
+    YoAi 调大 full_schema_budget 跳过聚焦，项目模式 30 工具仍在预算内。"""
+    from yoai.agent import YoAiAgent
+
+    monkeypatch.delenv("YOAI_SCHEMA_BUDGET", raising=False)
+    a = YoAiAgent(data_dir=tmp_path)
+    assert a.core._loop.full_schema_budget == 64
+
+    monkeypatch.setenv("YOAI_SCHEMA_BUDGET", "0")
+    assert YoAiAgent(data_dir=tmp_path / "b").core._loop.full_schema_budget == 0
+
+    monkeypatch.setenv("YOAI_SCHEMA_BUDGET", "bad")
+    assert YoAiAgent(data_dir=tmp_path / "c").core._loop.full_schema_budget == 64
