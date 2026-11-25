@@ -14,10 +14,10 @@ const CY = H / 2;
 /** 生命周期 → 填充色（纸墨主题语义，对齐旧端 Palette）。 */
 function lifecycleColor(lc: string): string {
   switch (lc) {
-    case "active": return "var(--vermilion)";
-    case "probation": return "var(--warn)";
-    case "candidate": return "var(--weak)";
-    case "retired": return "var(--rule)";
+    case "active": return "var(--lc-active)";
+    case "probation": return "var(--lc-probation)";
+    case "candidate": return "var(--lc-candidate)";
+    case "retired": return "var(--lc-retired)";
     default: return "var(--dim)";
   }
 }

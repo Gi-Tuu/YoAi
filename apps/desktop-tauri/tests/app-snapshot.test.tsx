@@ -25,6 +25,7 @@ const snap: SnapshotMsg = {
   goals: [],
   write_stats: { events: 2 },
   tools: [],
+  thinking_log: [],
 };
 
 function emit(m: unknown) { for (const l of listeners) l(m); }
@@ -50,5 +51,35 @@ describe("App snapshot 消费", () => {
     expect(select.options[0]?.text).toContain("测试会话");
     expect(screen.getAllByText(/spark-x2\.6/).length).toBeGreaterThan(0);
     expect(screen.getByText(/主题偏好/)).toBeTruthy();
+  });
+});
+
+describe("历史消息 thinking 显示", () => {
+  beforeEach(() => { listeners.clear(); localStorage.clear(); });
+
+  it("snapshot 携带 thinking_log 时历史消息显示可展开入口", async () => {
+    const withThink: SnapshotMsg = {
+      ...snap,
+      history: [
+        { role: "user", text: "记住我叫小明" },
+        { role: "assistant", text: "好的，已记住。" },
+      ],
+      thinking_log: [{
+        run_id: "r1", session_id: "s1", at: "2026-11-25T12:00:00",
+        text: "用户说叫小明，应当写入事实", input: "记住我叫小明",
+      }],
+    };
+    render(<App />);
+    await waitFor(() => expect(listeners.size).toBeGreaterThan(0));
+    await act(async () => {
+      emit({ v: 1, type: "ready", protocol: 1, python: "3.13", tools: [], sessions: [], config: {} });
+      emit(withThink);
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    const link = screen.getByText(/查看思考过程/);
+    expect(link).toBeTruthy();
+    // 默认折叠，点开展示正文
+    await act(async () => { (link as HTMLElement).click(); await new Promise((r) => setTimeout(r, 30)); });
+    expect(screen.getByText(/用户说叫小明/)).toBeTruthy();
   });
 });

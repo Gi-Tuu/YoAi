@@ -42,6 +42,14 @@ export interface GoalInfo {
   status: string;
 }
 
+export interface ThinkingRecord {
+  run_id: string;
+  session_id: string;
+  at: string;
+  text: string;
+  input?: string;
+}
+
 /** 会话全景（旧端主窗口侧栏数据源的等价物）。 */
 export interface SnapshotMsg extends BaseMsg {
   type: "snapshot";
@@ -53,6 +61,7 @@ export interface SnapshotMsg extends BaseMsg {
   goals: GoalInfo[];
   write_stats: Record<string, number>;
   tools: string[];
+  thinking_log: ThinkingRecord[];   // 历史 thinking（YoAi 侧持久化）
 }
 
 export interface ChatEntry {

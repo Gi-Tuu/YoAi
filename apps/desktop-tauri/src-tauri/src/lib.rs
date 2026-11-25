@@ -6,6 +6,13 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows：隐藏 Python 子进程的控制台窗口（CREATE_NO_WINDOW = 0x08000000）。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use tauri::{Emitter, Manager, State};
 
 pub struct RuntimeState {
@@ -51,15 +58,23 @@ fn dev_root() -> PathBuf {
 
 fn spawn_runtime(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), String> {
     let (python, script) = runtime_paths(app);
-    let mut child = Command::new(&python)
-        .arg(&script)
+    // Windows 隐藏 Python 子进程控制台；非 Windows 用空函数 no-op。
+    #[cfg(windows)]
+    fn hide_console(cmd: &mut Command) { cmd.creation_flags(CREATE_NO_WINDOW); }
+    #[cfg(not(windows))]
+    fn hide_console(_cmd: &mut Command) {}
+
+    let mut cmd = Command::new(&python);
+    cmd.arg(&script)
         .current_dir(script.parent().unwrap_or(std::path::Path::new(".")))
         // 数据目录由 runtime 自举（dist/runtime → dist/output，保留旧端会话数据）；
         // 不再注入 Tauri AppData，否则新旧端数据分家。
         .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("启动 Python runtime 失败（{}）：{}", python.display(), e))?;
 

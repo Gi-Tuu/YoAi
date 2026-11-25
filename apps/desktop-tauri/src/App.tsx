@@ -13,7 +13,7 @@ import { SideCards } from "./components/SideCards";
 import { CommsPage } from "./components/CommsPage";
 import { GalaxyPage } from "./components/GalaxyPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
-import type { RuntimeMsg, SnapshotMsg } from "./types/ipc";
+import type { RuntimeMsg, SnapshotMsg, ThinkingRecord } from "./types/ipc";
 
 const newId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -22,6 +22,25 @@ const PAGE_TITLES: Record<string, string> = {
 };
 
 /** 旧端 _clean_final_text 已在 runtime 完成；这里只兜底空文本。 */
+/** 历史消息：带可展开的 thinking（从 YoAi 侧持久化记录按提问文本对齐）。 */
+function HistoryRun({ text, thinking }: { text: string; thinking?: ThinkingRecord }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <article className="chat-run history-run">
+      <header className="run-head"><span className="who">YoAi</span></header>
+      {thinking?.text?.trim() && (
+        <div className="history-think">
+          <button className="think-link" onClick={() => setOpen((v) => !v)}>
+            {open ? "▾ 收起思考过程" : `▸ 查看思考过程（${thinking.text.length} 字）`}
+          </button>
+          {open && <div className="think-block">[思考] {thinking.text}</div>}
+        </div>
+      )}
+      <div className="final-answer"><Markdown text={text} /></div>
+    </article>
+  );
+}
+
 function ChatRun({ run, streaming }: { run: RunState; streaming: boolean }) {
   const rounds = useMemo(() => [...run.streamText.entries()].sort((a, b) => a[0] - b[0]), [run.streamText]);
   // 静默失败修复（对齐旧端 _task_had_error）：报错后的"完成"必须标出来
@@ -221,14 +240,14 @@ export default function App() {
             <div className="chat-col">
               <div className="chat-scroll">
                 {/* 历史消息（当前会话持久化历史） */}
-                {(snap?.history ?? []).map((h, i) => (
-                  h.role === "user"
-                    ? <div key={`h${i}`} className="user-msg">{h.text}</div>
-                    : <article key={`h${i}`} className="chat-run history-run">
-                        <header className="run-head"><span className="who">YoAi</span></header>
-                        <div className="final-answer"><Markdown text={h.text} /></div>
-                      </article>
-                ))}
+                {(snap?.history ?? []).map((h, i, arr) => {
+                  if (h.role === "user") return <div key={`h${i}`} className="user-msg">{h.text}</div>;
+                  // 对齐 thinking：找最近一条用户提问匹配该记录的 input
+                  const prevUser = [...arr.slice(0, i)].reverse().find((m) => m.role === "user");
+                  const think = (snap?.thinking_log ?? []).find(
+                    (t) => t.input && prevUser && t.input.trim() === prevUser.text.trim());
+                  return <HistoryRun key={`h${i}`} text={h.text} thinking={think} />;
+                })}
                 {runList.length === 0 && (snap?.history ?? []).length === 0 && (
                   <div className="empty">输入一个任务，开始与 YoAi 对话。</div>
                 )}

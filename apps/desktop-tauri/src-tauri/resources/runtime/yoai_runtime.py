@@ -102,6 +102,8 @@ class Runtime:
         self.running: dict[str, tuple[str, str]] = {}  # run_id -> (task_id, cancelled?)
         self.pending_approvals: dict[str, asyncio.Future] = {}
         self.stream_text: dict[str, str] = {}  # run_id -> 累积流式文本（final 空时兜底）
+        self.think_buffer: dict[str, str] = {}  # run_id -> 累积 thinking（落盘用）
+        self.thinking_store: Any = None
         self._write_lock = asyncio.Lock()
 
     # ---- 输出 ----
@@ -131,6 +133,14 @@ class Runtime:
         if not self.sessions.list_sessions():
             self.sessions.create("新会话")
         self.agent = self.sessions.current_agent()
+
+        # thinking 持久化（YoAi 侧，内核零改动）：历史消息也能看思考过程
+        try:
+            from yoai.thinking_store import ThinkingStore
+            self.thinking_store = ThinkingStore(data_dir)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"thinking store init failed: {exc}")
+            self.thinking_store = None
 
         # 通讯基础设施（旧端 build_demo_channel / build_registry 语义）
         from yoai.adapters import build_registry
@@ -229,6 +239,12 @@ class Runtime:
             tools = [str(t) for t in self.agent.list_tools()]
         except Exception:  # noqa: BLE001
             pass
+        thinking_log: list[dict[str, Any]] = []
+        if self.thinking_store is not None and current:
+            try:
+                thinking_log = self.thinking_store.load(current.id)
+            except Exception:  # noqa: BLE001
+                pass
         return snapshot(
             sessions=sessions,
             current_id=current.id if current else "",
@@ -238,6 +254,7 @@ class Runtime:
             goals=goals,
             write_stats=write_stats,
             tools=tools,
+            thinking_log=thinking_log,
         )
 
     async def _push_snapshot(self) -> None:
@@ -410,7 +427,21 @@ class Runtime:
                     if name == "delta":
                         self.stream_text[run_id] = (
                             self.stream_text.get(run_id, "") + str(data.get("text", "")))
+                    if name == "thinking":
+                        self.think_buffer[run_id] = (
+                            self.think_buffer.get(run_id, "") + str(data.get("text", "")))
                     if name == "done":
+                        # thinking 落盘（历史消息也能展开查看）
+                        think = self.think_buffer.get(run_id, "")
+                        if self.thinking_store is not None and think.strip():
+                            try:
+                                sid = (self.sessions.current.id
+                                       if self.sessions and self.sessions.current else "")
+                                self.thinking_store.append(
+                                    session_id=sid, run_id=run_id,
+                                    text=think, user_input=user_input)
+                            except Exception as exc:  # noqa: BLE001
+                                _log(f"thinking persist failed: {exc}")
                         text = str(data.get("final_text", ""))
                         if not text.strip():
                             # final 空但流式有内容（异常收尾/网关差异）→ 流式兜底
@@ -441,6 +472,7 @@ class Runtime:
                 return
             finally:
                 self.stream_text.pop(run_id, None)
+                self.think_buffer.pop(run_id, None)
             # 证据落盘（旁路，失败不影响任务结果；旧端 worker.py 语义）
             if collector is not None and self.evidence_store is not None:
                 try:

@@ -1,43 +1,82 @@
-/* 设计令牌：纸墨工作台配色（对齐旧 PySide6 端 cosmic/theme.py 的 Palette）。
-   light=纸（THEME_PAPER）/ dark=墨（THEME_DEEP），由 <html data-theme> 显式切换。 */
+/* 设计令牌：宇宙星球系主题（项目所有者 2026-11-22 原设计，对齐 AMBRACE d2.css）。
+ * 硬约束：零圆角 / 无阴影 / 无装饰性渐变 / 装饰性强调色每页 ≤6 处 / 星空只进墨纸档。
+ * 双主题：light 纸墨 #f4f0e6 底 · #1b1815 墨；dark 墨纸 #131110 底 · #e9e1d4 墨。
+ * 强调色：砖红 #8c3f2b / 朱红 #d8452a / 绿 #4f6b4a / 琥珀 #a8642c。
+ * 环图六档：同一支砖红谱由深到浅 + 一档灰。
+ * 字体角色：界面雅黑 / 标题宋体 / 数字 Georgia / 代码 Consolas。
+ * 字号阶梯：cap10.5 note11.5 body12.5 lead13 h3=15 h2=16 h1=19 code22 num26 date40。
+ * 缓动：cubic-bezier(.2,.7,.3,1)。
+ */
 :root {
-  --bg: #F6F5F1;          /* paper */
-  --surface: #FFFFFF;     /* paper2 */
-  --surface-2: #EEEFEA;   /* nav */
-  --ink: #242522;
-  --dim: #51574F;
-  --weak: #62685F;
-  --accent: #B64732;      /* brick */
-  --vermilion: #C65A3E;
-  --warn: #9A641C;
-  --ok: #3F6B58;
-  --bad: #C65A3E;
-  --rule: #D9DBD4;
-  --accent-soft: #F4E7E2;
-  --on-accent: #FFFFFF;
+  /* 色板（纸墨档，原值） */
+  --bg: #f4f0e6;          /* paper 页底 */
+  --surface: #efe9db;     /* paper2 次底（卡片/侧栏） */
+  --surface-2: #efe9db;
+  --ink: #1b1815;         /* 主文字 */
+  --dim: #6f665a;         /* 次文字 */
+  --weak: #756a5c;        /* 弱文字 */
+  --accent: #8c3f2b;      /* brick 砖红 */
+  --brick: #8c3f2b;
+  --vermilion: #d8452a;   /* 朱红 */
+  --ok: #4f6b4a;
+  --warn: #a8642c;
+  --bad: #d8452a;
+  --rule: #d8cfbd;        /* 1px 实线描边 */
+  --accent-soft: #efe9db; /* 强调柔化：与原设计一致，不用半透明 */
+  --on-accent: #f4f0e6;
+  --star: #c2871d;        /* 纸色档星点=金（落叶感） */
+  --meteor-head: #c2871d;
+  --meteor-tail: #e3ae3c;
+  --retired: #6f4a0f;     /* 深赭熄灭 */
+  /* 环图六档 */
+  --ring1: #8c3f2b; --ring2: #a8563c; --ring3: #c1714f;
+  --ring4: #d69b76; --ring5: #e3bb9c; --ring6: #c3bdb1;
+  /* 生命周期 */
+  --lc-active: #d8452a; --lc-probation: #a8642c;
+  --lc-candidate: #756a5c; --lc-retired: #6f4a0f;
 
+  /* 字体角色 */
+  --font: "Microsoft YaHei", "DengXian", system-ui, sans-serif;   /* 界面雅黑 */
+  --font-title: "SimSun", "Songti SC", "STSong", serif;           /* 标题宋体 */
+  --font-num: Georgia, "Times New Roman", serif;                  /* 数字 */
+  --mono: Consolas, "Cascadia Code", monospace;                   /* 代码 */
+
+  /* 字号阶梯 */
+  --fs-cap: 10.5px; --fs-note: 11.5px; --fs-body: 12.5px;
+  --fs-lead: 13px; --fs-h3: 15px; --fs-h2: 16px; --fs-h1: 19px;
+  --fs-code: 22px; --fs-num: 26px; --fs-date: 40px;
+
+  /* 间距 / 圆角（零圆角）/ 缓动 */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
-  --radius: 10px; --radius-sm: 6px;
-  --font: "Segoe UI", "Microsoft YaHei", "DengXian", system-ui, sans-serif;
-  --mono: "Cascadia Code", Consolas, "SF Mono", monospace;
+  --radius: 0; --radius-sm: 0;
+  --ease: cubic-bezier(.2, .7, .3, 1);
   --fast: 120ms; --normal: 220ms;
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #171918;
-  --surface: #202321;
-  --surface-2: #1C1F1D;
-  --ink: #ECEEE8;
-  --dim: #B4BAB0;
-  --weak: #9DA599;
-  --accent: #E08A72;
-  --vermilion: #F0552F;
-  --warn: #D6A45F;
-  --ok: #8FC7A7;
-  --bad: #F0552F;
-  --rule: #343A34;
-  --accent-soft: #392923;
-  --on-accent: #171918;
+  --bg: #131110;          /* 墨纸档 */
+  --surface: #1a1714;
+  --surface-2: #1a1714;
+  --ink: #e9e1d4;
+  --dim: #a99d8d;
+  --weak: #8d8172;
+  --accent: #c9785f;
+  --brick: #c9785f;
+  --vermilion: #f0552f;
+  --ok: #8dbf95;
+  --warn: #d3924f;
+  --bad: #f0552f;
+  --rule: #302b24;
+  --accent-soft: #1a1714;
+  --on-accent: #131110;
+  --star: #e9e1d4;
+  --meteor-head: #fff6e0;
+  --meteor-tail: #ffbe96;
+  --retired: #6f4a0f;
+  --ring1: #c9785f; --ring2: #d98f6d; --ring3: #e5a882;
+  --ring4: #eec39f; --ring5: #f4d8bd; --ring6: #4f463d;
+  --lc-active: #f0552f; --lc-probation: #d3924f;
+  --lc-candidate: #8d8172; --lc-retired: #6f4a0f;
   color-scheme: dark;
 }

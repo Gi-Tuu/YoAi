@@ -137,3 +137,45 @@ def test_clean_final_text_removes_legacy_dsml_blocks():
     # 模型在正文里正常讨论 DSML 时不能误删
     prose = "DSML 块被解析、被发出去了，但没有结果块回来。"
     assert clean_final_text(prose) == prose
+
+
+def test_thinking_store_append_load_and_trim(tmp_path):
+    """thinking 持久化：按会话隔离、可读回、上限裁剪。"""
+    from yoai.thinking_store import MAX_RECORDS, ThinkingStore
+
+    store = ThinkingStore(tmp_path)
+    store.append(session_id="s1", run_id="r1", text="思考一", user_input="问题一")
+    store.append(session_id="s1", run_id="r2", text="思考二", user_input="问题二")
+    store.append(session_id="s2", run_id="r3", text="别的会话", user_input="问题三")
+
+    s1 = store.load("s1")
+    assert len(s1) == 2 and s1[0]["text"] == "思考一" and s1[1]["input"] == "问题二"
+    assert len(store.load("s2")) == 1
+    assert store.load("missing") == []
+
+    # 上限裁剪保留最近记录
+    for i in range(MAX_RECORDS + 5):
+        store.append(session_id="s1", run_id=f"r{i}", text=f"t{i}")
+    assert len(store.load("s1")) == MAX_RECORDS
+    assert store.load("s1")[-1]["text"] == f"t{MAX_RECORDS + 4}"
+
+
+def test_thinking_store_append_load_and_trim(tmp_path):
+    """thinking 持久化：按会话隔离、可读回、上限裁剪。"""
+    from yoai.thinking_store import MAX_RECORDS, ThinkingStore
+
+    store = ThinkingStore(tmp_path)
+    store.append(session_id="s1", run_id="r1", text="思考一", user_input="问题一")
+    store.append(session_id="s1", run_id="r2", text="思考二", user_input="问题二")
+    store.append(session_id="s2", run_id="r3", text="别的会话", user_input="问题三")
+
+    s1 = store.load("s1")
+    assert len(s1) == 2 and s1[0]["text"] == "思考一" and s1[1]["input"] == "问题二"
+    assert len(store.load("s2")) == 1
+    assert store.load("missing") == []
+
+    # 上限裁剪保留最近记录
+    for i in range(MAX_RECORDS + 5):
+        store.append(session_id="s1", run_id=f"r{i}", text=f"t{i}")
+    assert len(store.load("s1")) == MAX_RECORDS
+    assert store.load("s1")[-1]["text"] == f"t{MAX_RECORDS + 4}"

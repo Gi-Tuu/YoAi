@@ -86,14 +86,16 @@ def approval_request(task_id: str, run_id: str, seq: int, tool: str,
 def snapshot(*, sessions: list[dict[str, Any]], current_id: str,
              history: list[dict[str, Any]], model: str,
              facts: dict[str, str], goals: list[dict[str, Any]],
-             write_stats: dict[str, int], tools: list[str]) -> dict[str, Any]:
-    """会话全景状态：会话列表 + 当前历史 + 记忆侧栏数据。"""
+             write_stats: dict[str, int], tools: list[str],
+             thinking_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """会话全景状态：会话列表 + 当前历史 + 记忆侧栏数据 + 历史 thinking。"""
     return {
         "v": PROTOCOL_VERSION, "type": "snapshot",
         "sessions": sessions, "current_id": current_id,
         "history": history, "model": model,
         "facts": facts, "goals": goals,
         "write_stats": write_stats, "tools": tools,
+        "thinking_log": thinking_log or [],
     }
 
 
