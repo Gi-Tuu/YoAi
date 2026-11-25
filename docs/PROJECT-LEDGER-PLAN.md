@@ -47,4 +47,12 @@
 
 - 旧 PySide6 端 UI 全部能力搬入 Tauri 新端 + 旧端源码清理删除（28 删除/13 修改/4 新增）
 - 详见 `docs/OLD-UI-MIGRATION.md`
-- 待办：GUI 目视验证（需用户实际打开 dist/YoAi.exe）；确认后 commit
+- GUI 目视验证已完成并 commit；当前为稳定态
+
+### 2026-11-25 下午 · 已关闭的事项
+
+- 原生浮窗（悬停出桌面）：5 轮尝试全部白屏，已放弃并回退（提交 b74379a）；
+  结论写进项目 MEMORY.md 与 DESKTOP-SWITCH.md，不再重试
+- 60s 硬超时（spark-x2.6 推理模型误杀）：已修为 180s，`YOAI_MODEL_TIMEOUT` 可覆盖
+- 只读工具可发现性（模型误判"能力缺失"）：已修描述文案 + 回归测试
+- 残留调试环境变量 `YOAI_RUNTIME_LOG`：已清除（用户级）

@@ -28,6 +28,7 @@
 | **桌面exe流式修复(2026-11-24)** | 根因：桌面走 SuanliAdapter(讯飞 spark-x2.6)→GatewayModelProvider，第一版流式只在 Anthropic 路径、exe 未使用；修：Suanli 加 OpenAI 兼容 SSE（content/reasoning_content 增量、tool_calls 聚合），agent drain 穿透 .base+.adapter 包装链；真实网关 text/thinking 增量验证通过；**22:24 重打包 exe(57.6MB)自检通过**（22:07 首版曾有 reasoning 逐 token 裂成多行的显示 bug，已修为合并成一段）；全量 **286 passed** | STREAMING-OUTPUT.md |
 | **思考默认折叠(2026-11-24)** | 用户拍板：思考内容默认折叠，只留「▸ 查看思考过程（N字）」入口；独立锚点 yoai:think:N 与过程块折叠互不干扰；已展开时一段连续文本+收起入口；22:38 exe 重打包自检通过 | STREAMING-OUTPUT.md |
 | **过程行同行(2026-11-24)** | 截图反馈 [步骤] 标签与内容分行：md_to_html 段落块级 `<p>` 所致；加 inline=True（span）供过程行用，默认行为不变；**22:57 exe 重打包自检通过**，全量 **288 passed** | MARKDOWN-RENDERING.md |
+| **桌面稳定态(2026-11-25 16:05)** | Tauri 新端为唯一默认（`dist/YoAi.exe` 9.9MB，回退稳定版）；原生浮窗 5 轮尝试全白屏已放弃并回退到常驻三卡侧栏；保留 60s→180s 超时修复与只读工具可发现性修复；权限三档按会话独立、按会话配置持久化；历史 thinking 落盘可见；用户旅程守护测试 7 类；本地全量 **258 passed + 1 skipped**、前端 11 passed | OLD-UI-MIGRATION.md / PERMISSION-SESSION-ISOLATION.md / DESKTOP-SWITCH.md |
 | **runtime 接入修复(2026-11-25 上午)** | 修复 4 个真 bug：①start_task 漏 create_task（任务从未执行）②数据目录指错（旧会话不可见）③YAI_CORE_SRC 指向 src 致网关静默降级 ④空目录首次启动 KeyError；补单实例守卫；实测 task→161 事件→final→done，dist exe 重编 9.9MB；全量 241 passed | OLD-UI-MIGRATION.md 第七节 |
 | **旧端UI搬迁+清理(2026-11-25)** | PySide6 端全部能力搬入 Tauri 新端（会话管理/侧栏卡片/通讯页/星球系/纸墨主题/错误可见/模型chip/证据落盘），随后旧端源码删除（src/yoai/desktop/ 16文件+cosmic 7文件+10个Qt测试+yoai.spec）；协议 v1 追加 snapshot/chat.*/archive.*；新增 yoai/bootstrap.py 承接 agent 组装；全量 **241 passed**、前端 8 passed、Rust 构建成功、dist/YoAi.exe+runtime 已更新；dist/YoAi-PySide6.exe 留作回退 | OLD-UI-MIGRATION.md |
 | 进程/单实例 | QLocalSocket单实例守卫(进程死OS自动释放，无陈旧锁)；worker的requestInterruption真cancel asyncio任务，根治关窗后YoAi.exe残留 | src/yoai/desktop/single_instance.py |
@@ -55,7 +56,7 @@
 
 | 项 | 当前状态 | 备注 |
 |---|---|---|
-| GitHub 仓库 | https://github.com/Gi-Tuu/YoAi（公开）；master=0d0d28d；**CI 已配**（GitHub Actions，push/PR 全量 pytest，240 passed 绿） | .github/workflows/tests.yml |
+| GitHub 仓库 | https://github.com/Gi-Tuu/YoAi（公开）；master=b74379a（本地，未 push；远端 0d0d28d）；**CI 已配**（GitHub Actions，push/PR 全量 pytest；本地全量 258 passed + 1 skipped） | .github/workflows/tests.yml |
 | License | PolyForm Noncommercial 1.0（限制商用） | 同系列可平滑升级商用 |
 | CLA | 版权转让型 | CLA.md + CONTRIBUTING.md |
 | 云端资料库 | `ASSISTANT-ROOT-CAUSE-BREAKTHROUGH` doc 为更新目标 | 已同步区间结论 |
