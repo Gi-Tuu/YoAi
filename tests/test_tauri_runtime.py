@@ -120,3 +120,20 @@ def test_agent_kwargs_builtin_tools_off(monkeypatch):
     monkeypatch.setenv("YOAI_BUILTIN_TOOLS", "0")
     kwargs = agent_kwargs(auto_approve=True)
     assert kwargs["builtin_tools"] is False and "policy" in kwargs
+
+
+def test_clean_final_text_removes_legacy_dsml_blocks():
+    """历史遗留 DSML（11-24 路由根治前）不显示乱码；正常提到 DSML 一词保留。"""
+    raw = (
+        "正常说明文字\n\n"
+        "<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name=\"list_facts\"> "
+        "<｜｜DSML｜｜ parameter name=\"reason\" string=\"true\">检查\n"
+        "</｜｜DSML｜｜ parameter> </｜｜DSML｜｜ invoke> </｜｜DSML｜｜ calls>"
+    )
+    out = clean_final_text(raw)
+    assert "正常说明文字" in out
+    assert "DSML" not in out and "list_facts" not in out and "invoke" not in out
+
+    # 模型在正文里正常讨论 DSML 时不能误删
+    prose = "DSML 块被解析、被发出去了，但没有结果块回来。"
+    assert clean_final_text(prose) == prose

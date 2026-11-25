@@ -49,8 +49,8 @@ function ChatRun({ run, streaming }: { run: RunState; streaming: boolean }) {
           </div>
         ))}
 
-      {/* 流式文本：每轮一段；完成后以 final 定稿为准，避免重复 */}
-      {streaming && rounds.map(([round, text]) => text && (
+      {/* 流式文本：每轮一段；final 到了就隐藏，只留定稿，避免同一段显示两遍 */}
+      {streaming && !run.finalText && rounds.map(([round, text]) => text && (
         <div key={round} className="stream-block"><Markdown text={text} streaming /></div>
       ))}
 

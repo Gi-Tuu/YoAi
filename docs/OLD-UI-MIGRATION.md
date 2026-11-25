@@ -91,3 +91,26 @@
 
 **注意**：`spark-x2.6` 是推理模型，带工具定义时首字延迟可达 40 秒以上——
 新端 front-end 会显示 thinking 过程，属于预期行为，不是卡死。
+
+## 八、DSML 残留调查（2026-11-25，用户反馈截图乱码）
+
+**用户看到**：对话里 `[object Object],[object Object],` + `<｜｜DSML｜｜ calls>...` 乱码重复两遍。
+
+**调查结论（非新泄漏）**：
+- 全历史库扫描：DSML 文本共 8 条，**全部产生于 2026-11-24 03:11–03:16**
+  （会话 `4d3579b2b444`），即 `YoAiRouter` 根治方案（11-24 晚）**之前**的遗留数据。
+- 当前 agent 的 router 已确认是 `YoAiRouter`（`memory_intent_routing=True`），
+  有工具一律 REACT 注入完整 schema，不会再产生 DSML 正文调用。
+- 重复两遍是**前端显示 bug**：`ChatRun` 里流式区（`streaming && rounds`）与定稿区
+  （`finalText`）在 final 到达但状态未切换时同时渲染——已修为 `streaming && !finalText`。
+
+**修复（双保险）**：
+1. `yoai/bootstrap.py::clean_final_text()` 增加历史 DSML 块清理：
+   正则整体移除 `<｜｜DSML｜｜ calls>...</｜｜DSML｜｜ calls>` 块（全角 ｜ U+FF5C），
+   保留模型正文里正常讨论 "DSML" 一词的句子。
+2. runtime `_snapshot()` 加载历史时已调用 clean_final_text（208 行），自动生效。
+3. 回归测试 `test_clean_final_text_removes_legacy_dsml_blocks`（tests/test_tauri_runtime.py），
+   覆盖"乱码清除 + 正常讨论保留"两面。
+
+**实证**：42 条历史中 DSML 乱码 0 条，正常讨论 DSML 的消息 1 条保留。
+全量 **242 passed**。

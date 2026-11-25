@@ -127,4 +127,14 @@ def clean_final_text(text: str) -> str:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
+    # 清理历史遗留的 DSML 标记（11-24 路由根治前模型在正文里写的工具调用）。
+    # 原文用全角 ｜（U+FF5C）作分隔符，形如
+    #   <｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="x"> ... </｜｜DSML｜｜ invoke>
+    # 整块是模型误把工具调用写进正文，对用户无意义——整体移除，不留半截 XML。
+    cleaned = re.sub(
+        r"<\s*[｜|]{2}\s*DSML\s*[｜|]{2}\s*calls\s*>.*?<\s*/\s*[｜|]{2}\s*DSML\s*[｜|]{2}\s*calls\s*>",
+        "", cleaned, flags=re.DOTALL,
+    )
+    # 兜底：孤立的开/闭标签（没有成对 calls 包裹时）
+    cleaned = re.sub(r"<\s*/?\s*[｜|]{2}\s*DSML\s*[｜|]{2}\s*\w+[^>]*>", "", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
