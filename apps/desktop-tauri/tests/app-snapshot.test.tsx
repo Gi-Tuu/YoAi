@@ -50,7 +50,8 @@ describe("App snapshot 消费", () => {
     expect(select.value).toBe("s1");
     expect(select.options[0]?.text).toContain("测试会话");
     expect(screen.getAllByText(/spark-x2\.6/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/主题偏好/)).toBeTruthy();
+    // 事实不再常驻侧栏，而是右侧锚点方块（悬停才展开）；角标显示数量
+    expect(screen.getByTitle("个人事实 · 1")).toBeTruthy();
   });
 });
 

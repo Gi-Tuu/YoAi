@@ -58,3 +58,21 @@ cp YoAi-PySide6.exe YoAi.exe     # 覆盖回旧端（先另存新的）
 - 新端 UI 的功能完整度见 `FEATURE-MAPPING.md`（设置页/会话页/拖动/DPI 未做）。
 - 打包成 MSI 分发到其他机器仍需嵌入式 Python（见 `WINDOWS-BUILD.md`）；
   本机已用持久环境变量解决。
+
+## 对话页锚点交互（2026-11-25 14:20）
+
+右侧信息栏从常驻三卡改成**边缘小方块锚点**：事实「事」/目标「志」/记忆「忆」，
+带数量角标。悬停以自身为中心展开 DOM popover（140ms 生长动画），落点按与对话区/
+窗口边缘的距离自适应（computeAnchorPosition 纯函数，jsdom 可测）；指针在方块与
+卡片间移动不误关，移开 140ms 收回。
+
+**点击「◱ 钉住」转 Tauri 原生浮窗**：无边框/透明/置顶/可拖动缩放，能浮到桌面任意位置。
+主窗口 snapshot 变化时通过 `push_float_data` emit 给已钉住的浮窗；浮窗加载
+`index.html?float=<kind>`，在入口层分流，只渲染不连 runtime（避免第二个 IPC 客户端
+发 hello 污染任务流）。
+
+**关键修复**：`on_window_event` 的 runtime shutdown 限定 main 窗口——否则关浮窗会把
+Python 子进程杀掉。
+
+测试：前端 16 passed（新增 anchor-rail.test.tsx 6 项：几何自适应/hover/钉住）、
+全量 Python 256 passed；Rust 编译通过。

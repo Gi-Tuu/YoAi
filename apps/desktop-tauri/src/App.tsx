@@ -9,7 +9,7 @@ import { ipc } from "./lib/ipc";
 import { useTaskStream, type RunState } from "./hooks/useTaskStream";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { Markdown } from "./components/Markdown";
-import { SideCards } from "./components/SideCards";
+import { AnchorRail } from "./components/AnchorRail";
 import { CommsPage } from "./components/CommsPage";
 import { GalaxyPage } from "./components/GalaxyPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
@@ -166,6 +166,8 @@ export default function App() {
         requestAnimationFrame(() => scrollToBottom(true));  // 切会话回到最新消息
       }
       setSnap(m);
+      // 已钉住的浮窗同步最新数据（无浮窗时 Rust 侧静默跳过）
+      void ipc.pushFloatData(JSON.stringify(m)).catch(() => {});
       requestAnimationFrame(() => scrollToBottom());
     }
   }, [msgs, resetRuns]);
@@ -324,7 +326,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <SideCards snap={snap} />
+            <AnchorRail snap={snap} />
           </main>
         )}
 

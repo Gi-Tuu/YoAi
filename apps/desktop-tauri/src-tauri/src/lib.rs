@@ -13,7 +13,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 pub struct RuntimeState {
     child: Mutex<Option<Child>>,
@@ -129,6 +129,51 @@ fn runtime_status(state: State<'_, RuntimeState>) -> bool {
     state.child.lock().map(|g| g.as_ref().is_some_and(|c| c.id() > 0)).unwrap_or(false)
 }
 
+/// 打开/聚焦一个信息浮窗（钉住能力）。无边框、置顶、可拖动、可缩放，能浮到桌面任意位置。
+/// 浮窗加载同一前端，带 ?float=<kind> 查询参数；数据由主窗口 emit 过来，浮窗不连 runtime。
+#[tauri::command]
+fn open_float_panel(app: tauri::AppHandle, kind: String, title: String) -> Result<(), String> {
+    let label = format!("float-{}", kind);
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        return Ok(());   // 已存在则只显示，不重复建窗
+    }
+    let url = format!("index.html?float={}", kind);
+    let webview_url = WebviewUrl::App(url.parse().map_err(|e| format!("bad url: {:?}", e))?);
+    WebviewWindowBuilder::new(&app, &label, webview_url)
+        .title(&title)
+        .inner_size(320.0, 260.0)
+        .min_inner_size(220.0, 160.0)
+        .decorations(false)      // 自绘标题栏（纸墨风格）
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("创建浮窗失败：{}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_float_panel(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.close();
+    }
+    Ok(())
+}
+
+/// 主窗口把最新 snapshot 推送给已存在的浮窗；浮窗不存在时静默跳过（没钉住）。
+#[tauri::command]
+fn push_float_data(app: tauri::AppHandle, payload: String) -> Result<(), String> {
+    for kind in ["facts", "goals", "memory"] {
+        let label = format!("float-{}", kind);
+        if app.get_webview_window(&label).is_some() {
+            let _ = app.emit_to(&label, "float://data", &payload);
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -173,6 +218,8 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 关键：只有主窗口关闭才 shutdown runtime。浮窗关闭不能杀掉 Python 子进程。
+            if window.label() != "main" { return; }
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.try_state::<RuntimeState>() {
                     // 优雅退出：shutdown 后等待子进程，避免残留
@@ -187,7 +234,9 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![ipc_send, runtime_status])
+        .invoke_handler(tauri::generate_handler![
+            ipc_send, runtime_status, open_float_panel, close_float_panel, push_float_data
+        ])
         .run(tauri::generate_context!())
         .expect("YoAi Tauri 启动失败");
 }
