@@ -116,3 +116,39 @@ def test_stream_tool_calls_flattened_for_gateway():
     assert resp.tool_calls[0].name == "remember_fact"
     assert resp.tool_calls[0].arguments["key"] == "偏好"
     assert resp.tool_calls[1].name == "recall_fact"
+
+
+def test_truncated_tool_arguments_never_become_empty_silently():
+    """max_tokens 截断 tool_calls arguments 时必须尽力修复或明示错误，
+    绝不能静默变 {} —— 那会让工具误报"必填参数缺失"、模型误判注入问题而放弃。"""
+    from yoai.models.suanli_adapter import flatten_stream_tool_calls
+
+    # 截断的字符串参数 → 尽力修复出 path/content
+    r = flatten_stream_tool_calls({0: {"id": "x", "function": {
+        "name": "proj_write",
+        "arguments": '{"path":"sokoban.html","content":"<html><body>abc'}}})
+    args = r[0]["arguments"]
+    assert args.get("path") == "sokoban.html"
+    assert "<html>" in args.get("content", "")
+
+    # 无法修复 → 带 _parse_error，不是空 dict
+    r2 = flatten_stream_tool_calls({0: {"id": "x", "function": {
+        "name": "proj_write", "arguments": '{"path":'}}})
+    assert "_parse_error" in r2[0]["arguments"]
+
+    # 正常 JSON 不受影响
+    r3 = flatten_stream_tool_calls({0: {"id": "x", "function": {
+        "name": "f", "arguments": '{"a":1}'}}})
+    assert r3[0]["arguments"] == {"a": 1}
+
+
+def test_suanli_max_tokens_default_large_enough(monkeypatch):
+    """默认 max_tokens 必须足够大，否则长 content 的 tool_call 会被截断。"""
+    from yoai.models.suanli_adapter import SuanliAdapter
+
+    monkeypatch.delenv("YOAI_MAX_TOKENS", raising=False)
+    assert SuanliAdapter().max_tokens == 32000
+    monkeypatch.setenv("YOAI_MAX_TOKENS", "8000")
+    assert SuanliAdapter().max_tokens == 8000
+    monkeypatch.setenv("YOAI_MAX_TOKENS", "bad")
+    assert SuanliAdapter().max_tokens == 32000

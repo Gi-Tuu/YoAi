@@ -98,13 +98,23 @@ class SuanliAdapter(PeerAdapter):
         env_path: str | Path = DEFAULT_CORE_ENV,
         enabled: bool = True,
         timeout_s: float = 60.0,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,   # None=读 YOAI_MAX_TOKENS，默认 32000
         temperature: float | None = None,
         transport_retries: int = 2,
     ) -> None:
         super().__init__(name, enabled=enabled, timeout_s=timeout_s)
         self.env_path = Path(env_path)
-        self.max_tokens = max_tokens
+        # max_tokens 是单次模型输出上限（含 tool_calls 的 arguments JSON）。
+        # 默认 1024 会让"把整份源码写进 proj_write(content=...)"这类调用被截断：
+        # JSON 参数没写完 → 解析成空 {} → 工具报"path/content 必填"（2026-11-25 实测）。
+        # 默认 32000，可用 YOAI_MAX_TOKENS 覆盖。
+        if max_tokens is None:
+            try:
+                self.max_tokens = int(os.environ.get("YOAI_MAX_TOKENS", "32000").strip())
+            except ValueError:
+                self.max_tokens = 32000
+        else:
+            self.max_tokens = max_tokens
         # None=不传该字段（保持网关默认与既有行为）；显式值用于稳定抽取实验。
         # AMBRACE extractor.py:582 用 temperature=0.1 做记忆抽取，借鉴此思路。
         self.temperature = temperature
@@ -357,6 +367,35 @@ def _extract_text(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return text.strip(), usage
 
 
+def _repair_truncated_json(raw: str) -> dict[str, Any] | None:
+    """尽力修复被 max_tokens 截断的 tool_calls arguments JSON。
+
+    常见截断：字符串值写到一半断掉、缺结尾引号/括号。逐位回退补齐 " / } / ]，
+    解析成功则返回 dict；实在救不回返回 None（由调用方带 _parse_error 明示）。
+    """
+    s = raw.strip()
+    if not s.startswith("{"):
+        return None
+    candidates = [s]
+    # 截断常见形态：缺右引号 / 缺右括号 / 两者都缺，以及尾部逗号
+    for suffix in ('"', '}', '"]', '"}', '"}]', '}]', '",', '"}'):
+        candidates.append(s + suffix)
+    # 逐步去掉不完整的尾部键值片段再补括号
+    for cut in range(1, min(40, len(s)) + 1):
+        head = s[:-cut].rstrip().rstrip(",")
+        for suffix in ('"', '"}', '}', '"}]', ']}'):
+            candidates.append(head + suffix)
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(parsed, dict) and parsed:
+            # 空 dict 不算"修复成功"——那等于参数全丢，正是要避免的静默失败
+            return parsed
+    return None
+
+
 def flatten_stream_tool_calls(raw_calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     """流式 SSE 聚合结果与 GatewayModelProvider 期望对齐（扁平 name/arguments）。
 
@@ -373,7 +412,18 @@ def flatten_stream_tool_calls(raw_calls: dict[int, dict[str, Any]]) -> list[dict
             try:
                 arguments = json.loads(arguments)
             except (ValueError, TypeError):
-                arguments = {}
+                # 关键：不能静默变成 {}——那会让工具报"必填参数缺失"，
+                # 模型误判为"参数注入问题"并放弃（2026-11-25 实测）。
+                # 尽力修复被截断的 JSON（补引号/括号），实在不行把原始片段
+                # 放进 _parse_error 让调用方/模型看到真实原因。
+                repaired = _repair_truncated_json(arguments)
+                if repaired is not None:
+                    arguments = repaired
+                else:
+                    arguments = {"_parse_error": (
+                        "tool_calls arguments JSON 解析失败（疑似 max_tokens 截断）："
+                        f"{arguments[:120]!r}…（原始长度 {len(arguments)}）"
+                    )}
         out.append({
             "id": str(slot.get("id", "")),
             "name": str(fn.get("name", "")),
