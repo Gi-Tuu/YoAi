@@ -154,6 +154,18 @@ export class IpcClient {
     await this.send({ v: PROTOCOL_VERSION, type: "session.new_in_project", project_id: projectId, name });
   }
 
+  // ---- 右侧工具面板 ----
+  /** 内嵌 iframe 被站点拒绝时的兜底：runtime 校验协议后交系统浏览器。 */
+  async openExternal(url: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "browser.open", url });
+  }
+  async listFiles(path: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "fs.list", path });
+  }
+  async readFile(path: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "fs.read", path });
+  }
+
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });
     this.disconnect();

@@ -209,13 +209,43 @@ export interface ApprovalRequestMsg extends BaseMsg {
 
 export interface ErrorMsg extends BaseMsg {
   type: "error";
-  stage: "startup" | "runtime" | "protocol";
+  stage: "startup" | "runtime" | "protocol" | "file" | "browser";
   message: string;
+}
+
+/** 右侧工具面板：系统浏览器兜底已触发。 */
+export interface BrowserOpenedMsg extends BaseMsg {
+  type: "browser.opened";
+  url: string;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;       // 相对根目录
+  is_dir: boolean;
+}
+
+export interface FileTreeMsg extends BaseMsg {
+  type: "file.tree";
+  root: string;
+  label: string;
+  path: string;
+  entries: FileEntry[];
+}
+
+export interface FileContentMsg extends BaseMsg {
+  type: "file.content";
+  root: string;
+  path: string;
+  content: string;
+  size: number;
+  truncated: boolean;
 }
 
 export type RuntimeMsg =
   | ReadyMsg | StatusMsg | EventMsg | FinalMsg | ApprovalRequestMsg | ErrorMsg
-  | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg | PermissionStateMsg | FileChangedMsg;
+  | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg | PermissionStateMsg
+  | FileChangedMsg | BrowserOpenedMsg | FileTreeMsg | FileContentMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -241,6 +271,9 @@ export type Command =
   | { v: 1; type: "project.list" }
   | { v: 1; type: "project.delete"; project_id: string }
   | { v: 1; type: "session.new_in_project"; project_id: string; name?: string }
+  | { v: 1; type: "browser.open"; url: string }
+  | { v: 1; type: "fs.list"; path: string }
+  | { v: 1; type: "fs.read"; path: string }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

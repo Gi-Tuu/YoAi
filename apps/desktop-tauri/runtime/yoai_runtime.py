@@ -61,9 +61,9 @@ for _p in _candidates:
         sys.path.insert(0, str(_p))
 
 from protocol import (  # noqa: E402  (自举后导入)
-    PROTOCOL_VERSION, Seq, approval_request, archive_state, chat_msg,
-    chat_state, encode, error, event, file_changed, final, permission_state, ready,
-    snapshot, status,
+    PROTOCOL_VERSION, Seq, approval_request, archive_state, browser_opened, chat_msg,
+    chat_state, encode, error, event, file_changed, file_content, file_tree, final,
+    permission_state, ready, snapshot, status,
 )
 
 
@@ -328,6 +328,20 @@ class Runtime:
     def _session_id(self) -> str:
         current = getattr(self.sessions, "current", None) if self.sessions else None
         return str(current.id) if current else ""
+
+    def _file_root(self) -> tuple[Path, str]:
+        """文件面板根目录：项目会话=项目文件夹；聊天会话=data_dir/workspace。
+
+        与项目工具同一套越界防护（resolve_in_project），面板只读，不发放写能力。
+        """
+        current = getattr(self.sessions, "current", None) if self.sessions else None
+        if current is not None and getattr(current, "mode", "chat") == "project":
+            proj = self.projects.get(getattr(current, "project_id", "")) if self.projects else None
+            if proj is not None:
+                return Path(proj.path).resolve(), f"项目 · {proj.name}"
+        root = _data_dir() / "workspace"
+        root.mkdir(parents=True, exist_ok=True)
+        return root.resolve(), "工作区"
 
     def _agents_clear(self) -> None:
         """清空会话 agent 缓存（项目变更/删除后必须重建，否则工具集是旧的）。"""
@@ -834,6 +848,54 @@ class Runtime:
                 self._sync_permission_for_session(self.agent)
                 await self._push_snapshot()
                 await self._push_permission_state()
+        elif typ == "browser.open":
+            # 内嵌 iframe 被站点 X-Frame-Options 拒绝时的兜底：只放 http/https，
+            # 复用标准库 webbrowser，不给 shell 能力、不回显 key。
+            from urllib.parse import urlparse
+            url = str(cmd.get("url", "")).strip()
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                await self.send(error("browser", "只支持 http/https 网址"))
+            else:
+                import webbrowser
+                try:
+                    webbrowser.open(url)
+                    await self.send(browser_opened(url=url))
+                except Exception as exc:  # noqa: BLE001
+                    await self.send(error("browser", f"打开系统浏览器失败：{type(exc).__name__}: {exc}"))
+        elif typ in ("fs.list", "fs.read"):
+            # 右侧「查看文件」面板：只读，路径限制在当前项目根 / 工作区内。
+            from yoai.project import ProjectError, resolve_in_project
+            root, label = self._file_root()
+            rel = str(cmd.get("path", ""))
+            try:
+                target = resolve_in_project(root, rel)
+                if typ == "fs.list":
+                    if not target.is_dir():
+                        raise ProjectError(f"不是目录：{rel}")
+                    children = sorted(target.iterdir(),
+                                      key=lambda p: (not p.is_dir(), p.name.lower()))
+                    entries = [
+                        {"name": c.name,
+                         "path": c.relative_to(root).as_posix(),
+                         "is_dir": c.is_dir()}
+                        for c in children[:500]
+                    ]
+                    await self.send(file_tree(root=str(root), label=label,
+                                              path=rel, entries=entries))
+                else:
+                    if not target.is_file():
+                        raise ProjectError(f"不是文件：{rel}")
+                    limit = 200_000
+                    with target.open("rb") as handle:
+                        raw = handle.read(limit + 1)
+                    truncated = len(raw) > limit
+                    await self.send(file_content(
+                        root=str(root), path=rel,
+                        content=raw[:limit].decode("utf-8", errors="replace"),
+                        size=target.stat().st_size, truncated=truncated))
+            except (ProjectError, OSError) as exc:
+                await self.send(error("file", str(exc)))
         elif typ == "shutdown":
             for task in list(self.tasks.values()):
                 task.cancel()

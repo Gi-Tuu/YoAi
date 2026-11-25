@@ -211,10 +211,61 @@ button.ghost:hover { color: var(--accent); background: var(--accent-soft); }
 .chat-col { flex: 0 1 900px; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .history-run .run-head { margin-bottom: 0; }
 
+.right-rail {
+  position: relative; flex: 1 0 0; min-width: var(--window-control-width);
+  display: flex; flex-direction: column;
+}
 .side-cards {
   --tile-size: 58px;
-  position: relative; z-index: 1; flex: 1 0 0; min-width: var(--window-control-width);
+  position: relative; z-index: 1; flex: 1 1 auto; min-height: 220px;
 }
+
+/* 右侧下方三个工具方格：浏览器 / 终端 / 查看文件 */
+.tool-dock { position: relative; z-index: 12; flex: none; padding: 0 10px 14px; }
+.tool-dock-grid { display: grid; grid-template-columns: repeat(3, 58px);
+  gap: 8px; justify-content: center; }
+.dock-tile { width: 58px; aspect-ratio: 1; padding: 0; display: grid; place-content: center;
+  gap: 2px; font-size: 11px; background: var(--surface-2); }
+.dock-tile.active { border-color: var(--accent); background: var(--accent-soft); }
+.dock-icon { font-size: 18px; line-height: 1; color: var(--accent); font-family: var(--mono); }
+.tool-panel { position: absolute; right: 10px; bottom: 74px; z-index: 20;
+  width: min(380px, calc(100vw - 40px)); height: min(460px, 68vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius);
+  box-shadow: 0 8px 28px #0003; }
+.tool-panel > header { display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-2) var(--sp-3); font-size: 12px; color: var(--accent);
+  border-bottom: 1px solid var(--rule); }
+.tool-panel-close { padding: 0; width: 24px; height: 24px; line-height: 1; font-size: 16px; }
+.tool-notice { padding: 4px var(--sp-3); font-size: 11px; color: var(--dim);
+  border-bottom: 1px solid var(--rule); }
+.tool-browser, .tool-terminal, .tool-files { flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+.tool-urlbar, .tool-pathbar { display: flex; align-items: center; gap: 6px; flex: none; }
+.tool-urlbar input { flex: 1; min-width: 0; padding: 5px 8px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.tool-frame { flex: 1; width: 100%; background: var(--surface); border: 1px solid var(--rule); }
+.tool-empty { padding: var(--sp-3); font-size: 12px; color: var(--weak); }
+.tool-log { flex: 1; min-height: 0; overflow: auto; }
+.tool-log-entry { border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  margin-bottom: var(--sp-2); overflow: hidden; }
+.tool-log-head { padding: 5px 8px; font-size: 11px; color: var(--dim); background: var(--surface-2); }
+.tool-log-head span { float: right; }
+.tool-log-head span[data-state="done"] { color: var(--ok); }
+.tool-log-head span[data-state="failed"], .tool-log-head span[data-state="cancelled"] { color: var(--bad); }
+.tool-log-entry pre, .tool-file-content pre { margin: 0; padding: 8px; overflow: auto;
+  font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.tool-pathbar { flex-wrap: wrap; font-size: 11px; }
+.tool-pathbar button { padding: 2px 5px; font-size: 11px; }
+.tool-sep { color: var(--weak); margin: 0 2px; }
+.tool-tree { flex: 1 1 40%; min-height: 0; overflow: auto; border: 1px solid var(--rule); }
+.tool-entry { display: block; width: 100%; text-align: left; border: none; border-radius: 0;
+  padding: 4px 8px; font-size: 12px; }
+.tool-entry-icon { display: inline-block; width: 14px; color: var(--accent); }
+.tool-file-content { flex: 1 1 55%; min-height: 0; display: flex; flex-direction: column;
+  border: 1px solid var(--rule); }
+.tool-file-head { padding: 4px 8px; font-size: 11px; color: var(--dim); background: var(--surface-2); }
+.tool-file-content pre { flex: 1; background: var(--surface); }
 .side-tile {
   position: absolute; translate: -50% -50%; z-index: 4;
   width: var(--tile-size); aspect-ratio: 1; padding: 0; display: grid;

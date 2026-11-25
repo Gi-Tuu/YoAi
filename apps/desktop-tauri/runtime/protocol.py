@@ -146,3 +146,31 @@ def permission_state(*, level: str, description: str) -> dict[str, Any]:
         "v": PROTOCOL_VERSION, "type": "permission.state",
         "level": level, "description": description,
     }
+
+
+# ---- v1 扩展（右侧工具面板：浏览器 / 查看文件）----
+
+def browser_opened(*, url: str) -> dict[str, Any]:
+    """系统浏览器已接受打开请求（内嵌 iframe 被站点拒绝时的兜底）。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "browser.opened", "url": url,
+    }
+
+
+def file_tree(*, root: str, label: str, path: str,
+              entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """文件视图的一级目录内容；path 为相对根的路径，条目带 name/path/is_dir。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "file.tree",
+        "root": root, "label": label, "path": path, "entries": entries,
+    }
+
+
+def file_content(*, root: str, path: str, content: str,
+                 size: int, truncated: bool) -> dict[str, Any]:
+    """文件文本预览；仅文本、有长度上限，不返回二进制。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "file.content",
+        "root": root, "path": path, "content": content,
+        "size": size, "truncated": truncated,
+    }

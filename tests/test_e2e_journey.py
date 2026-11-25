@@ -328,3 +328,49 @@ def test_journey_empty_data_dir_creates_initial_session(tmp_path, monkeypatch):
     sessions.create("新会话")
     assert len(sessions.list_sessions()) == 1
     assert sessions.current_agent() is not None
+
+
+# ---------------- 旅程 7：右侧工具方格 ----------------
+
+def test_tool_dock_fs_commands(tmp_path, monkeypatch):
+    """查看文件：列目录/读文本/越界拒绝——面板只读且锁在工作区内。"""
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    rt = make_runtime(store_dir=tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "note.txt").write_text("你好文件", encoding="utf-8")
+    (workspace / "sub").mkdir()
+    (tmp_path / "outside.txt").write_text("不可读", encoding="utf-8")
+
+    out = collect(rt)
+    run(rt.handle({"type": "fs.list", "path": ""}))
+    tree = next(m for m in out if m["type"] == "file.tree")
+    assert tree["label"] == "工作区" and tree["path"] == ""
+    assert {e["name"] for e in tree["entries"]} == {"note.txt", "sub"}
+
+    out.clear()
+    run(rt.handle({"type": "fs.read", "path": "note.txt"}))
+    content = next(m for m in out if m["type"] == "file.content")
+    assert content["content"] == "你好文件" and content["truncated"] is False
+
+    out.clear()
+    run(rt.handle({"type": "fs.read", "path": "../outside.txt"}))
+    assert any(m["type"] == "error" and m["stage"] == "file" for m in out)
+    assert not any(m["type"] == "file.content" for m in out)
+
+
+def test_tool_dock_browser_open(monkeypatch):
+    """系统浏览器兜底只放 http/https；file:// 必须拒绝。"""
+    import webbrowser
+    monkeypatch.setattr(webbrowser, "open", lambda url: True)
+    rt = make_runtime()
+
+    out = collect(rt)
+    run(rt.handle({"type": "browser.open", "url": "https://example.com"}))
+    opened = next(m for m in out if m["type"] == "browser.opened")
+    assert opened["url"] == "https://example.com"
+
+    out.clear()
+    run(rt.handle({"type": "browser.open", "url": "file:///etc/passwd"}))
+    assert any(m["type"] == "error" and m["stage"] == "browser" for m in out)
+    assert not any(m["type"] == "browser.opened" for m in out)

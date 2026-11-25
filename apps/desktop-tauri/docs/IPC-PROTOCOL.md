@@ -162,6 +162,18 @@
 | `chat.msg` | `target`,`sender`,`name`,`content`,`own` | 单条聊天消息 |
 | `archive.state` | `nodes[]`（depth 已算好） | 星图绘制数据 |
 
+### v1 追加（右侧工具方格：浏览器 / 查看文件）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `browser.open` | `url` | 仅 `http/https`；交系统浏览器作为 iframe 被拒时的兜底，成功回 `browser.opened` |
+| `fs.list` | `path` | 列当前项目根（项目会话）或 `data_dir/workspace`（聊天会话）内的目录，回 `file.tree` |
+| `fs.read` | `path` | 只读文本，最多 20 万字符，回 `file.content`；越界/非文件回 `error(stage=file)` |
+
+对应新消息：`browser.opened{url}`、`file.tree{root,label,path,entries[]}`、
+`file.content{root,path,content,size,truncated}`；错误阶段新增 `file`/`browser`。
+终端面板不新增命令——命令作为普通 `task.start` 交给 YoAi 调 `shell_run`，审批沿用既有通道。
+
 ### 行为约定
 
 1. `task` 事件序列规则不变；`snapshot` 与 run 事件流相互独立。

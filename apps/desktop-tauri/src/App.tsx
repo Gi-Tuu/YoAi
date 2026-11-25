@@ -10,6 +10,7 @@ import { useTaskStream, type RunState } from "./hooks/useTaskStream";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { Markdown } from "./components/Markdown";
 import { SideCards } from "./components/SideCards";
+import { ToolDock } from "./components/ToolDock";
 import { ProjectPanel } from "./components/ProjectPanel";
 import { Artifacts, Changes } from "./components/FileChanges";
 import { shrinkWindow, restoreWindow } from "./lib/capsuleWindow";
@@ -198,6 +199,16 @@ export default function App() {
     const run = runs.get(activeRunId);
     if (run) void ipc.cancelTask(run.taskId, run.runId).catch((e) => setErr(String(e)));
   }, [runs, activeRunId]);
+
+  // 终端面板的命令走普通任务链：shell_run 仍由权限档位决定是否弹审批，
+  // 终端方格本身不绕过安全机制，只负责提交与展示结果。
+  const runTerminalCommand = useCallback((input: string) => {
+    const taskId = newId("t"); const runId = newId("r");
+    beginRun(taskId, runId, input);
+    stickBottomRef.current = true;
+    void ipc.startTask(taskId, runId, input).catch((e) => setErr(String(e)));
+    return runId;
+  }, [beginRun]);
 
   const active = runs.get(activeRunId);
   const busy = active?.state === "running";
@@ -405,7 +416,10 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <SideCards snap={snap} />
+            <div className="right-rail">
+              <SideCards snap={snap} />
+              <ToolDock runs={runs} ready={ready} onRunCommand={runTerminalCommand} onError={setErr} />
+            </div>
           </main>
         )}
 
