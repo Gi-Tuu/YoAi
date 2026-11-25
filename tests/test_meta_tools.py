@@ -72,7 +72,10 @@ def test_list_tools_and_request_capability_registered(tmp_path):
     agent = YoAiAgent(data_dir=tmp_path / "d", builtin_tools=True)
     names = {s.name for s in agent._all_tool_specs}
     assert "list_tools" in names
-    assert "request_capability" in names
+    # request_capability 改由 Core discovery 注册为 meta_tool（loop 拦截），
+    # 不在 YoAi 手动 specs 里——验证它在 registry 与 meta_tools 中
+    assert agent.core.registry.has("request_capability")
+    assert "request_capability" in agent.core._loop.meta_tools
     # list_tools 运行时如实列出全部（含它自己和 request_capability）
     raw = agent.core.registry.run("list_tools", {}) if hasattr(
         agent.core.registry, "run") else None

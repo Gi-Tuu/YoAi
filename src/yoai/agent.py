@@ -116,7 +116,14 @@ class YoAiAgent:
             verifier = outcome_verifier
         # memory 必须在构造时传入：Core 的 AgentLoop 在构造时就绑定 memory 引用，
         # 事后替换 core.memory 不会生效（loop 仍持旧实例）。
-        core_kwargs: dict[str, Any] = {"outcome_verifier": verifier}
+        # discovery：Core 只有配了发现源才把 request_capability 注册为 meta_tool
+        # （由 loop 拦截）；YoAi 不再手动注册，根治"应由 Agent Loop 直接处理"报错。
+        from yai_core.discovery import StaticCatalog
+        core_kwargs: dict[str, Any] = {
+            "outcome_verifier": verifier,
+            "discovery": StaticCatalog([]),   # 空目录：允许声明缺口，不动态加工具
+        }
+        # 实操工具（文件/联网）：Core 公开 API 注册，内核零改动、升级兼容。
         if memory is not None:
             core_kwargs["memory"] = memory
         # 审批通道与权限策略在构造时绑定（Core 的 loop 持有引用，事后换无效）。
@@ -162,17 +169,13 @@ class YoAiAgent:
             # 仅 file_ro_list / file_ro_read，路径必须落在白名单根内，无写类操作。
             if readonly_roots:
                 specs = specs + readonly_tool_specs(readonly_roots)
-        # meta 工具（常驻，2026-11-24 YoAi 自检反馈）：
-        # - list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
-        # - request_capability：Core 现成实现，模型发现缺工具时显式声明能力缺口，
-        #   内核拦截处理（handler 由 loop 接管，不会真的执行 _unreachable）。
+        # list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
+        # request_capability 由 Core 的 discovery 机制注册为 meta_tool 并拦截处理。
         specs.append(self._build_list_tools_spec())
-        from yai_core.tools.meta import build_request_capability_tool
-        specs.append(build_request_capability_tool())
         return specs
 
     def _build_list_tools_spec(self) -> Any:
-        """构造 list_tools 工具：运行时读 _all_tool_specs，如实反映当前工具表。"""
+        """构造 list_tools 工具：运行时读 Core registry（真实全量工具表）。"""
         import json
 
         from yai_core import build_spec
@@ -180,9 +183,10 @@ class YoAiAgent:
         def list_tools() -> str:
             """列出当前会话可用的全部工具（名称+一句话描述）。
             不确定自己能做什么、或找不到想要的工具时先调用它，不要靠猜。"""
+            specs = self.core.registry.all() if self.core is not None else self._all_tool_specs
             return json.dumps(
                 [{"name": s.name, "description": (s.description or "").strip()}
-                 for s in self._all_tool_specs],
+                 for s in specs],
                 ensure_ascii=False, indent=1,
             )
 
