@@ -306,3 +306,4 @@ button.primary { background: var(--accent); color: var(--on-accent); border-colo
 .modal-actions .danger { background: var(--bad); color: var(--on-accent); border-color: var(--bad); }
 .modal-options { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
 .modal-option { text-align: left; }
+

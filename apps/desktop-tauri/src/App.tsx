@@ -102,6 +102,7 @@ export default function App() {
 
   useEffect(() => {
     const off = ipc.onMessage((m) => {
+      setMsgs((prev) => [...prev, m]);   // 所有 runtime 消息进入消费队列
       if (m.type === "ready") setReady(true);
       if (m.type === "error" && m.stage === "startup") setErr(m.message);
     });
