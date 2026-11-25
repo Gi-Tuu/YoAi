@@ -234,8 +234,14 @@ class SuanliAdapter(PeerAdapter):
         网关实测（讯飞 spark-x2.6）：思考模型的增量在 delta.reasoning_content，
         正式回答在 delta.content——两者都推（reasoning 进 thinking_outbox）。
         tool_calls 的 arguments 以 JSON 片段增量出现，按 index 聚合。
+
+        重连：transport 失败按 transport_retries 指数退避重放，失败轮已推入
+        outbox 的增量会回滚，避免 UI 重复显示半截回答。这里**不设总时长上限**：
+        "卡住"由 socket 读超时（timeout_s，连续无增量即失败）发现，"重连"由
+        本重试承担；正常长推理持续出流时不会被硬截断。
         """
         import json as _json
+        import time as _time
         import urllib.request as _urlreq
 
         self.stream_round += 1
@@ -252,57 +258,86 @@ class SuanliAdapter(PeerAdapter):
         reasoning_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
         usage: dict[str, Any] = {}
-        try:
-            with _urlreq.urlopen(req, timeout=self.timeout_s) as resp:
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8", "replace").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data_str = line[5:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        chunk = _json.loads(data_str)
-                    except Exception:  # noqa: BLE001 - 坏块跳过，不能中断整轮
-                        continue
-                    if isinstance(chunk.get("usage"), dict):
-                        usage = chunk["usage"]
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = (choices[0] or {}).get("delta") or {}
-                    text = delta.get("content") or ""
-                    reasoning = delta.get("reasoning_content") or ""
-                    if text:
-                        content_parts.append(text)
-                        self.text_outbox.append((round_id, text))
-                    if reasoning:
-                        reasoning_parts.append(reasoning)
-                        self.thinking_outbox.append(reasoning)
-                    for call in delta.get("tool_calls") or []:
-                        idx = int(call.get("index", 0))
-                        slot = tool_calls.setdefault(idx, {
-                            "id": "", "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        })
-                        if call.get("id"):
-                            slot["id"] = call["id"]
-                        fn = call.get("function") or {}
-                        if fn.get("name"):
-                            slot["function"]["name"] = fn["name"]
-                        if fn.get("arguments"):
-                            slot["function"]["arguments"] += fn["arguments"]
-        except ModelHTTPError as exc:
-            self.last_status = f"http_{exc.status}"
+        last_http_error: ModelHTTPError | None = None
+        last_transport_error: Exception | None = None
+
+        for attempt in range(self.transport_retries + 1):
+            # 每次重连整轮重放，聚合状态与 UI 增量都从零开始
+            content_parts = []
+            reasoning_parts = []
+            tool_calls = {}
+            usage = {}
+            outbox_mark = (len(self.text_outbox), len(self.thinking_outbox))
+            try:
+                with _urlreq.urlopen(req, timeout=self.timeout_s) as resp:
+                    for raw_line in resp:
+                        line = raw_line.decode("utf-8", "replace").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = _json.loads(data_str)
+                        except Exception:  # noqa: BLE001 - 坏块跳过，不能中断整轮
+                            continue
+                        if isinstance(chunk.get("usage"), dict):
+                            usage = chunk["usage"]
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = (choices[0] or {}).get("delta") or {}
+                        text = delta.get("content") or ""
+                        reasoning = delta.get("reasoning_content") or ""
+                        if text:
+                            content_parts.append(text)
+                            self.text_outbox.append((round_id, text))
+                        if reasoning:
+                            reasoning_parts.append(reasoning)
+                            self.thinking_outbox.append(reasoning)
+                        for call in delta.get("tool_calls") or []:
+                            idx = int(call.get("index", 0))
+                            slot = tool_calls.setdefault(idx, {
+                                "id": "", "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            })
+                            if call.get("id"):
+                                slot["id"] = call["id"]
+                            fn = call.get("function") or {}
+                            if fn.get("name"):
+                                slot["function"]["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["function"]["arguments"] += fn["arguments"]
+                last_transport_error = None
+                break
+            except ModelHTTPError as exc:
+                # HTTP 错误不重试，避免放大限流/配置问题（与非流式同语义）
+                last_http_error = exc
+                del self.text_outbox[outbox_mark[0]:]
+                del self.thinking_outbox[outbox_mark[1]:]
+                break
+            except (Exception,) as exc:  # noqa: BLE001 - 含 URLError/socket.timeout
+                last_transport_error = exc
+                del self.text_outbox[outbox_mark[0]:]
+                del self.thinking_outbox[outbox_mark[1]:]
+                if attempt >= self.transport_retries:
+                    break
+                _time.sleep(0.5 * (2 ** attempt))
+
+        if last_http_error is not None:
+            self.last_status = f"http_{last_http_error.status}"
             return AdapterResult(False, level=self.level,
-                                 detail=friendly_http_error(exc.status, exc.message),
-                                 meta={"http_status": exc.status})
-        except (Exception,) as exc:  # noqa: BLE001 - 与 send 同步路径同语义（含 URLError/timeout）
+                                 detail=friendly_http_error(last_http_error.status,
+                                                            last_http_error.message),
+                                 meta={"http_status": last_http_error.status})
+        if last_transport_error is not None:
             self.last_status = "transport_error"
             return AdapterResult(False, level=self.level,
-                                 detail=f"网关连接失败：{type(exc).__name__}: {exc}（已重试）"
+                                 detail=f"网关连接失败：{type(last_transport_error).__name__}: "
+                                        f"{last_transport_error}（已重试）"
                                  if self.transport_retries else
-                                 f"网关连接失败：{type(exc).__name__}: {exc}")
+                                 f"网关连接失败：{type(last_transport_error).__name__}: "
+                                 f"{last_transport_error}")
 
         # 聚合：content 缺失时用 reasoning_content（与非流式 _extract_text 同语义）
         full_text = "".join(content_parts).strip() or "".join(reasoning_parts).strip()

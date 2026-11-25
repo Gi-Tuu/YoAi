@@ -127,44 +127,28 @@ def test_policy_copy_prevents_shared_template_pollution():
     assert permission_level_of(b) == "smart"
 
 
-def test_model_timeout_reasonable_for_reasoning_model(monkeypatch, tmp_path):
-    """推理模型（spark-x2.6）带工具 schema 首 token 可达 40s+，Core 默认 60s 会误杀。
-    YoAi 默认 180s；环境变量可覆盖/关闭；非法值回退。"""
+def test_model_timeout_default_no_hard_cap(monkeypatch, tmp_path):
+    """总时长硬上限默认取消：长推理持续出流不应被误杀（截图里的 180s TimeoutError）。
+    卡住交给传输层 socket 超时，重连交给 transport_retries；只有显式设正数才加回上限。
+    """
     from yoai.agent import YoAiAgent
 
     monkeypatch.delenv("YOAI_MODEL_TIMEOUT", raising=False)
     a = YoAiAgent(data_dir=tmp_path / "a")
-    assert a.core.model_timeout == 180.0
-    assert a.core._loop.model_timeout == 180.0   # 真正生效在 loop
+    assert a.core.model_timeout is None
+    assert a.core._loop.model_timeout is None   # 真正生效在 loop
 
     monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "0")
     assert YoAiAgent(data_dir=tmp_path / "b").core.model_timeout is None
+
+    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "-5")
+    assert YoAiAgent(data_dir=tmp_path / "b2").core.model_timeout is None
 
     monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "240")
     assert YoAiAgent(data_dir=tmp_path / "c").core.model_timeout == 240.0
 
     monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "not-a-number")
-    assert YoAiAgent(data_dir=tmp_path / "d").core.model_timeout == 180.0
-
-
-def test_model_timeout_reasonable_for_reasoning_model(monkeypatch, tmp_path):
-    """推理模型（spark-x2.6）带工具 schema 首 token 可达 40s+，Core 默认 60s 会误杀。
-    YoAi 默认 180s；环境变量可覆盖/关闭；非法值回退。"""
-    from yoai.agent import YoAiAgent
-
-    monkeypatch.delenv("YOAI_MODEL_TIMEOUT", raising=False)
-    a = YoAiAgent(data_dir=tmp_path / "a")
-    assert a.core.model_timeout == 180.0
-    assert a.core._loop.model_timeout == 180.0   # 真正生效在 loop
-
-    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "0")
-    assert YoAiAgent(data_dir=tmp_path / "b").core.model_timeout is None
-
-    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "240")
-    assert YoAiAgent(data_dir=tmp_path / "c").core.model_timeout == 240.0
-
-    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "not-a-number")
-    assert YoAiAgent(data_dir=tmp_path / "d").core.model_timeout == 180.0
+    assert YoAiAgent(data_dir=tmp_path / "d").core.model_timeout is None
 
 
 def test_readonly_tools_are_discoverable(monkeypatch, tmp_path):

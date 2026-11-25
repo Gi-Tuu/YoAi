@@ -101,11 +101,11 @@ def test_deepseek_success_with_fake_response(monkeypatch):
 def test_suanli_success_with_fake_response(monkeypatch, tmp_path):
     import yoai.models.suanli_adapter as mod
     p = tmp_path / ".env"
-    p.write_text("OPENAI_BASE_URL=https://fake/v1\nOPENAI_API_KEY=sk_secret_xyz\n"
+    p.write_text("OPENAI_BASE_URL=https://fake/v1\nOPENAI_API_KEY=<fake-key>\n"
                  "LLM_MODEL=fake-model\n", encoding="utf-8")
 
     def fake_post(url, payload, headers, timeout):
-        assert headers["Authorization"] == "Bearer sk_secret_xyz"
+        assert headers["Authorization"] == "Bearer <fake-key>"
         return {"choices": [{"message": {"content": "算里回答"}}],
                 "usage": {"total_tokens": 9}}
 
@@ -114,7 +114,7 @@ def test_suanli_success_with_fake_response(monkeypatch, tmp_path):
     a.stream = False   # 本测试验证非流式路径（SSE 路径另测）
     r = a.send("hi")
     assert r.ok is True and r.text == "算里回答"
-    assert "sk_secret_xyz" not in r.detail and "sk_secret_xyz" not in str(r.meta)
+    assert "<fake-key>" not in r.detail and "<fake-key>" not in str(r.meta)
 
 
 # --- 错误路径 ---
@@ -235,5 +235,47 @@ def test_suanli_stream_sse(monkeypatch, tmp_path):
     assert r.meta["usage"]["prompt_tokens"] == 5
     assert r.meta["usage"]["completion_tokens"] == 3
     assert a.drain_text() == []   # drain 后清空
+
+
+def test_suanli_stream_transport_retry_rolls_back_partial(monkeypatch, tmp_path):
+    """流式 transport 抖动应重连；失败轮已推入 outbox 的半截增量必须回滚。"""
+    import json
+    import urllib.request
+
+    p = tmp_path / ".env"
+    p.write_text("OPENAI_BASE_URL=https://fake/v1\nOPENAI_API_KEY=k\nLLM_MODEL=m\n",
+                 encoding="utf-8")
+
+    def sse(text: str) -> str:
+        return "data: " + json.dumps({"choices": [{"delta": {"content": text}}]})
+
+    class _PartialThenFail:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def __iter__(self):
+            yield (sse("半截") + "\n").encode()
+            raise TimeoutError("stalled")   # 模拟 socket 卡住
+
+    class _Good:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def __iter__(self):
+            return iter([(sse("好") + "\n").encode(), b"data: [DONE]\n"])
+
+    calls = []
+    def flaky(req, timeout):
+        calls.append(timeout)
+        return _PartialThenFail() if len(calls) == 1 else _Good()
+
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr("time.sleep", lambda _s: None)   # 不为退避等待测试时间
+    a = SuanliAdapter(env_path=p, transport_retries=1)
+    r = a.send("hi")
+    assert r.ok is True and r.text == "好" and len(calls) == 2
+    assert a.drain_text() == [(0, "好")]   # "半截" 已回滚，不会重复显示
 
 

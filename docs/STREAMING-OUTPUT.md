@@ -62,7 +62,8 @@ task（会丢事件）。
 1. **`SuanliAdapter._send_stream()`**：OpenAI 兼容 SSE（`stream:true`）逐行读增量，
    content 进 `text_outbox`、reasoning_content 进 `thinking_outbox`（思考模型增量
    在 reasoning_content），工具调用 arguments 按 index 聚合后交既有提取逻辑；
-   `YOAI_STREAM=0` 回退一次性 `post_json`；
+   `YOAI_STREAM=0` 回退一次性 `post_json`；transport 失败按 `transport_retries`
+   指数退避重放，失败轮已推入 outbox 的半截增量回滚（重连不重复显示）；
 2. **`YoAiAgent._outbox_provider()`**：沿 `.base` **和 `.adapter`** 穿透包装链
    ——桌面真实链是 `ExpertModelProvider → GatewayModelProvider → SuanliAdapter`，
    第一版只穿透 `.base` 拿不到 adapter 的增量；

@@ -125,16 +125,21 @@ class YoAiAgent:
         # discovery：Core 只有配了发现源才把 request_capability 注册为 meta_tool
         # （由 loop 拦截）；YoAi 不再手动注册，根治"应由 Agent Loop 直接处理"报错。
         from yai_core.discovery import StaticCatalog
-        # 单次模型调用硬超时：Core 默认 60s，对 spark-x2.6 这类推理模型太紧
-        # （带 26+ 工具 schema 时首 token 实测可达 40s，升档纠偏轮再叠加就破 60s）。
-        # 默认改为 180s；YOAI_MODEL_TIMEOUT=0 可关闭（交给模型客户端自身超时），
-        # 也支持显式数字覆盖。内核零改动——Core 公开构造参数。
+        # 单次模型调用总时长上限：默认**不设**（None）。
+        # 历史：Core 默认 60s 会误杀 spark-x2.6（带 26+ 工具 schema 首 token 实测
+        # 40s+），曾升到 180s；但长推理/大文件任务仍会被"总时长"硬截断，
+        # 而这类调用本身一直在正常出 token——硬上限解决不了卡住，只会误杀慢活。
+        # 现在交给传输层：socket 读超时负责"卡住"（连续 60s 无增量即失败），
+        # SuanliAdapter 的 transport_retries 负责"重连"；两者都不是总时长上限。
+        # 如需强制上限，显式设 YOAI_MODEL_TIMEOUT=<秒数>；0/负数/非法值均视为不设。
+        # 内核零改动——Core 公开构造参数，升级兼容。
         if model_timeout == "env":
-            raw = os.environ.get("YOAI_MODEL_TIMEOUT", "180").strip()
+            raw = os.environ.get("YOAI_MODEL_TIMEOUT", "0").strip()
             try:
-                resolved: float | None = None if raw == "0" else float(raw)
+                value = float(raw)
+                resolved: float | None = value if value > 0 else None
             except ValueError:
-                resolved = 180.0     # 环境变量填错不致命，回退安全默认
+                resolved = None      # 环境变量填错不致命，按默认不设上限处理
         else:
             resolved = model_timeout
         # 工具 schema 聚焦预算：Core 默认 24，超出后会让模型先做一次"只输出工具名

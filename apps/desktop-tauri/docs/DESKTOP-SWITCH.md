@@ -87,10 +87,14 @@ Python 子进程杀掉。
   250ms 延迟缓解但未在 GUI 实测
 - 浮窗 listener 用静态 import（动态 import 绕过 mock，且生产可能丢 float://data）
 
-**60s 超时修复**（用户截图 TimeoutError）：Core `AgentLoop` 默认 `model_timeout=60s`，
-spark-x2.6 带 26 工具 schema 首 token 可达 40s+，升档纠偏轮叠加就破 60s。
-YoAi 构造 AgentCore 时传 `model_timeout`（默认 180s，`YOAI_MODEL_TIMEOUT` 可覆盖，
-0=禁用），内核零改动。回归测试覆盖默认值/禁用/覆盖/非法回退。
+**超时口径最终调整**（截图中的 TimeoutError）：Core `AgentLoop` 默认 `model_timeout=60s`，
+spark-x2.6 带 26 工具 schema 首 token 可达 40s+，先升到 180s；但 180s 仍会误杀
+长推理/大文件这类持续出 token 的正常调用——总时长上限解决不了"卡住"，
+只会砍断慢活。最终默认**不设总时长上限**（`model_timeout=None`）：
+"卡住"由传输层 socket 读超时发现（连续 60s 无增量即失败），
+"重连"由 `SuanliAdapter.transport_retries`（流式/非流式均已接）承担。
+需要强制上限时显式设 `YOAI_MODEL_TIMEOUT=<正数秒>`；0/负数/非法值均视为不设。
+内核零改动（Core 公开构造参数）。回归测试覆盖默认值/覆盖/非法回退与流式重连回滚。
 
 会话 `977a2f22` 两条"无法查看目录"失败叙事已备份后清洗（能力已具备但历史污染）。
 
