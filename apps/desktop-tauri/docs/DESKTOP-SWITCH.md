@@ -4,8 +4,10 @@
 
 | 项 | 位置 | 说明 |
 |---|---|---|
-| **当前默认（新 Tauri）** | `dist/YoAi.exe` | 9.8MB，Tauri 2 + React UI |
-| 回退（旧 PySide6） | `dist/YoAi-PySide6.exe` | 60MB，原桌面端完整保留 |
+| **当前默认（新 Tauri）** | `dist/YoAi.exe` | Tauri 2 + React UI，功能已对齐旧端（会话管理/侧栏/通讯/星球系/主题） |
+| 回退（旧 PySide6） | `dist/YoAi-PySide6.exe` | 60MB，旧端**最后产物**（源码已删，仅存此 exe 作回退） |
+| 数据目录 | `dist/output/` | runtime 自举识别 dist 布局，**沿用旧端会话/记忆**（2 会话 62 条历史已验证） |
+| 单实例 | tauri-plugin-single-instance | 第二实例唤前台主窗（对齐旧端语义） |
 | 桌面快捷方式 | `~/Desktop/YoAi.lnk` | **未改动**，仍指向 `dist/YoAi.exe`（现在内容是新端） |
 | Python runtime | `dist/runtime/*.py` | 新 exe 启动时 spawn 的桥接层 |
 

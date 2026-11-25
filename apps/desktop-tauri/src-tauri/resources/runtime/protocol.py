@@ -79,3 +79,45 @@ def approval_request(task_id: str, run_id: str, seq: int, tool: str,
         "run_id": run_id, "seq": seq, "tool": tool,
         "question": question, "detail": detail,
     }
+
+
+# ---- v1 扩展（会话管理 / 通讯 / 星图）：旧消息全部不变，仅追加 ----
+
+def snapshot(*, sessions: list[dict[str, Any]], current_id: str,
+             history: list[dict[str, Any]], model: str,
+             facts: dict[str, str], goals: list[dict[str, Any]],
+             write_stats: dict[str, int], tools: list[str]) -> dict[str, Any]:
+    """会话全景状态：会话列表 + 当前历史 + 记忆侧栏数据。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "snapshot",
+        "sessions": sessions, "current_id": current_id,
+        "history": history, "model": model,
+        "facts": facts, "goals": goals,
+        "write_stats": write_stats, "tools": tools,
+    }
+
+
+def chat_state(*, conversations: list[dict[str, Any]],
+               external: list[dict[str, Any]]) -> dict[str, Any]:
+    """通讯页全景：会话（单聊+群）与外部智能体注册表。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "chat.state",
+        "conversations": conversations, "external": external,
+    }
+
+
+def chat_msg(*, target: str, sender: str, name: str, content: str,
+             own: bool, at: str = "") -> dict[str, Any]:
+    """一条聊天消息（含 runtime 收到的 peer 回复，主动推送）。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "chat.msg",
+        "target": target, "sender": sender, "name": name,
+        "content": content, "own": own, "at": at,
+    }
+
+
+def archive_state(*, nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    """进化档案星图：节点列表（depth 已算好，前端只画）。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "archive.state", "nodes": nodes,
+    }

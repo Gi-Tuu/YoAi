@@ -40,6 +40,9 @@ export function useTaskStream(messages: RuntimeMsg[]) {
   const [activeRunId, setActiveRunId] = useState<string>("");
   const pending = useRef<RuntimeMsg[]>([]);
   const timer = useRef<number | null>(null);
+  // 增量消费游标：messages 是只增数组（发送时重置为 []），只处理新到的部分，
+  // 否则每次全量重推会让同一事件被重复追加进 runs。
+  const processed = useRef(0);
 
   const flush = useCallback(() => {
     timer.current = null;
@@ -89,7 +92,13 @@ export function useTaskStream(messages: RuntimeMsg[]) {
   }, []);
 
   useEffect(() => {
-    pending.current.push(...messages);
+    if (messages.length < processed.current) {
+      processed.current = 0;   // App 在发送新任务时清空数组 → 重置游标
+    }
+    if (messages.length > processed.current) {
+      pending.current.push(...messages.slice(processed.current));
+      processed.current = messages.length;
+    }
     if (timer.current === null) {
       // 首帧立即 flush（首个可见更新不缓存），后续高频用 16ms 节流
       timer.current = window.setTimeout(flush, messages.length <= 2 ? 0 : 16);
@@ -118,7 +127,13 @@ export function useTaskStream(messages: RuntimeMsg[]) {
     });
   }, []);
 
-  return { runs, activeRunId, beginRun, clearApproval };
+  /** 切换会话/清空视图：丢弃全部 run 状态（历史由 snapshot.history 承担）。 */
+  const resetRuns = useCallback(() => {
+    setRuns(new Map());
+    setActiveRunId("");
+  }, []);
+
+  return { runs, activeRunId, beginRun, clearApproval, resetRuns };
 }
 
 /** 只在用户停留底部时自动跟随新内容。 */

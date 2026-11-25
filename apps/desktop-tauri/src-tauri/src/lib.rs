@@ -51,13 +51,11 @@ fn dev_root() -> PathBuf {
 
 fn spawn_runtime(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), String> {
     let (python, script) = runtime_paths(app);
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-
     let mut child = Command::new(&python)
         .arg(&script)
         .current_dir(script.parent().unwrap_or(std::path::Path::new(".")))
-        .env("YOAI_DATA_DIR", &data_dir)
+        // 数据目录由 runtime 自举（dist/runtime → dist/output，保留旧端会话数据）；
+        // 不再注入 Tauri AppData，否则新旧端数据分家。
         .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -120,6 +118,13 @@ fn runtime_status(state: State<'_, RuntimeState>) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // 单实例守卫（对齐旧端 QLocalSocket 语义）：第二实例把已运行的窗口唤到前台
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(RuntimeState::new())
         .setup(|app| {
             let state = app.state::<RuntimeState>();

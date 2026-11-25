@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from yai_core.policy import AllowlistPolicy
 
-from yoai.desktop.app import _agent_kwargs
+from yoai.bootstrap import agent_kwargs as _agent_kwargs
 
 
 def test_default_is_auto(monkeypatch):

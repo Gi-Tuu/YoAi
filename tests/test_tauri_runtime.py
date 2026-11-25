@@ -1,0 +1,122 @@
+"""Tauri runtime 协议层测试（不依赖 PySide6 / 不联网）。
+
+覆盖：protocol 构造器字段与前端 types/ipc.ts 的契约、bootstrap 纯函数
+（clean_final_text / resolve_model_name / agent_kwargs）。
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+_TAURI = Path(__file__).resolve().parents[1] / "apps" / "desktop-tauri" / "runtime"
+sys.path.insert(0, str(_TAURI))
+
+from protocol import (  # noqa: E402
+    PROTOCOL_VERSION, Seq, approval_request, archive_state, chat_msg,
+    chat_state, encode, error, event, final, ready, snapshot, status,
+)
+from yoai.bootstrap import agent_kwargs, clean_final_text, resolve_model_name  # noqa: E402
+
+
+# ---- Seq：每 run 独立单调递增 ----
+
+def test_seq_per_run_monotonic_and_reset():
+    seq = Seq()
+    assert [seq.for_run("t", "r1"), seq.for_run("t", "r1")] == [0, 1]
+    assert seq.for_run("t", "r2") == 0          # 不同 run 不串号
+    seq.reset_run("t", "r1")
+    assert seq.for_run("t", "r1") == 0          # 重置后从头计数
+
+
+def test_encode_compact_ascii_false():
+    line = encode({"type": "hello", "text": "中文"})
+    assert line.endswith("\n") and "中文" in line
+    assert ", " not in line                      # 紧凑分隔
+    assert json.loads(line)["text"] == "中文"
+
+
+# ---- 消息构造器：字段名与前端契约一一对应 ----
+
+def test_snapshot_fields():
+    m = snapshot(sessions=[{"id": "a", "name": "s"}], current_id="a",
+                 history=[{"role": "user", "text": "hi"}], model="spark-x2.6",
+                 facts={"名": "值"}, goals=[{"id": "g", "title": "t", "status": "pending"}],
+                 write_stats={"events": 2}, tools=["now"])
+    assert m["type"] == "snapshot"
+    assert m["model"] == "spark-x2.6" and m["write_stats"]["events"] == 2
+    assert m["history"][0]["role"] == "user"
+
+
+def test_chat_state_and_msg_fields():
+    cs = chat_state(conversations=[{"id": "g1", "name": "群", "kind": "group", "members": 2}],
+                    external=[{"name": "邮箱", "level": "L2", "available": True}])
+    assert cs["type"] == "chat.state"
+    assert cs["conversations"][0]["kind"] == "group"
+    cm = chat_msg(target="g1", sender="ext-邮箱", name="邮箱", content="你好", own=False)
+    assert cm["type"] == "chat.msg" and cm["own"] is False
+    assert {"target", "sender", "name", "content", "own"} <= set(cm)
+
+
+def test_archive_state_fields():
+    n = {"id": "root", "name": "通用根", "lifecycle": "active", "version": 1,
+         "parent_id": "", "depth": 0, "capability_tags": [], "tools": [],
+         "strategy_bias": "", "model_tier": "", "diff": "", "evidence_count": 0,
+         "created_at": "", "prompt_suffix": ""}
+    ar = archive_state(nodes=[n])
+    assert ar["type"] == "archive.state" and ar["nodes"][0]["depth"] == 0
+
+
+def test_v1_messages_unchanged():
+    assert ready(tools=[], sessions=[], config={}, python="3")["protocol"] == PROTOCOL_VERSION
+    s = status("t", "r", 0, "running", "")
+    assert s["state"] == "running" and s["seq"] == 0
+    e = event("t", "r", 1, "tool_call", {"tool": "now"})
+    assert e["event"] == "tool_call"
+    f = final("t", "r", 2, "答案")
+    assert f["text"] == "答案"
+    a = approval_request("t", "r", 3, "file_create", "确认执行该操作？", "{}")
+    assert a["tool"] == "file_create"
+    assert error("runtime", "boom")["stage"] == "runtime"
+
+
+# ---- bootstrap 纯函数 ----
+
+def test_clean_final_text_unwraps_tool_output():
+    raw = "<tool_output><attribution>查询</attribution>结果数据</tool_output>\n\n结论"
+    out = clean_final_text(raw)
+    assert "结果数据" in out and "<tool_output" not in out and "<attribution>" not in out
+
+
+def test_clean_final_text_collapses_blank_lines():
+    assert clean_final_text("a\n\n\n\n\nb") == "a\n\nb"
+
+
+def test_resolve_model_name_walks_wrappers():
+    class Adapter:
+        name = "算里 DeepSeek"
+
+        def _config(self):
+            return ("base", "key", "spark-x2.6")
+
+    class Gateway:
+        adapter = Adapter()
+
+    class Expert:
+        base = Gateway()
+
+    assert resolve_model_name(Expert()) == "spark-x2.6"
+
+    class DemoModel:
+        pass
+
+    assert resolve_model_name(DemoModel()) == "离线 Demo"
+
+
+def test_agent_kwargs_builtin_tools_off(monkeypatch):
+    monkeypatch.setenv("YOAI_BUILTIN_TOOLS", "0")
+    kwargs = agent_kwargs(auto_approve=True)
+    assert kwargs["builtin_tools"] is False and "policy" in kwargs

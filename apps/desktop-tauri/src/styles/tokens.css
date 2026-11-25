@@ -1,28 +1,43 @@
-/* 设计令牌：颜色 / 间距 / 字体 / 圆角 / 动画参数统一，支持后续主题扩展。 */
+/* 设计令牌：纸墨工作台配色（对齐旧 PySide6 端 cosmic/theme.py 的 Palette）。
+   light=纸（THEME_PAPER）/ dark=墨（THEME_DEEP），由 <html data-theme> 显式切换。 */
 :root {
-  --bg: #12151a;
-  --surface: #1a1f26;
-  --surface-2: #222831;
-  --ink: #e8ecf1;
-  --dim: #a4adba;
-  --weak: #6f7885;
-  --accent: #d9705a;
-  --accent-soft: rgba(217, 112, 90, 0.14);
-  --ok: #6fbf8f;
-  --bad: #d9705a;
-  --rule: #2b323c;
+  --bg: #F6F5F1;          /* paper */
+  --surface: #FFFFFF;     /* paper2 */
+  --surface-2: #EEEFEA;   /* nav */
+  --ink: #242522;
+  --dim: #51574F;
+  --weak: #62685F;
+  --accent: #B64732;      /* brick */
+  --vermilion: #C65A3E;
+  --warn: #9A641C;
+  --ok: #3F6B58;
+  --bad: #C65A3E;
+  --rule: #D9DBD4;
+  --accent-soft: #F4E7E2;
+  --on-accent: #FFFFFF;
 
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
   --radius: 10px; --radius-sm: 6px;
-  --font: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font: "Segoe UI", "Microsoft YaHei", "DengXian", system-ui, sans-serif;
   --mono: "Cascadia Code", Consolas, "SF Mono", monospace;
   --fast: 120ms; --normal: 220ms;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f5f1; --surface: #ffffff; --surface-2: #eeefea;
-    --ink: #242522; --dim: #5a6058; --weak: #8a9089;
-    --rule: #dcdcd5; --accent-soft: rgba(165, 59, 43, 0.08);
-  }
+:root[data-theme="dark"] {
+  --bg: #171918;
+  --surface: #202321;
+  --surface-2: #1C1F1D;
+  --ink: #ECEEE8;
+  --dim: #B4BAB0;
+  --weak: #9DA599;
+  --accent: #E08A72;
+  --vermilion: #F0552F;
+  --warn: #D6A45F;
+  --ok: #8FC7A7;
+  --bad: #F0552F;
+  --rule: #343A34;
+  --accent-soft: #392923;
+  --on-accent: #171918;
+  color-scheme: dark;
 }

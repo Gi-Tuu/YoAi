@@ -131,3 +131,40 @@
 ## TypeScript 类型
 
 见 `src/types/ipc.ts`（与本文件一一对应，改协议必须同步改类型与 runtime）。
+
+## v1 扩展（2026-11-25 旧端搬迁）：会话管理 / 通讯 / 星图
+
+旧 PySide6 端删除后，其全部能力经以下追加消息进入新端。**原有消息全部不变**，仅追加。
+
+### 新命令（前端 → runtime）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `session.state` | — | 回推一份 `snapshot` |
+| `session.create` | `name` | 新建会话并切换，回推 `snapshot` |
+| `session.switch` | `session_id` | 切换会话（重载历史），回推 `snapshot` |
+| `session.rename` | `session_id`,`name` | 重命名，回推 `snapshot`（空名回 error） |
+| `session.delete` | `session_id` | 从列表删除（历史文件保留），回推 `snapshot` |
+| `chat.state` | — | 回推 `chat.state` |
+| `chat.history` | `target` | 回推带 `history_target`+`history` 的 `chat.state` |
+| `chat.send` | `target`,`text` | 先回 `chat.msg(own=true)`，peer 回复逐条 `chat.msg` 推送 |
+| `chat.new_group` | `name` | 建群（拉入全部现有 peer），回推 `chat.state` |
+| `chat.add_member` | `target`,`peer_id` | 群拉人，回推 `chat.state` |
+| `chat.add_external` | `target`,`name` | 注册外部智能体并加入群，回推 `chat.state` |
+| `archive.get` | — | 回推 `archive.state`（进化档案全节点） |
+
+### 新消息（runtime → 前端）
+
+| type | 关键字段 | 说明 |
+|---|---|---|
+| `snapshot` | `sessions`,`current_id`,`history`,`model`,`facts`,`goals`,`write_stats`,`tools` | 会话全景；done 后自动回推刷新侧栏 |
+| `chat.state` | `conversations`(peer/group),`external`,可选 `history_target`+`history` | 通讯页全景 |
+| `chat.msg` | `target`,`sender`,`name`,`content`,`own` | 单条聊天消息 |
+| `archive.state` | `nodes[]`（depth 已算好） | 星图绘制数据 |
+
+### 行为约定
+
+1. `task` 事件序列规则不变；`snapshot` 与 run 事件流相互独立。
+2. `done` 后 runtime 自动追加一份 `snapshot`（记忆/事实/目标侧栏即时刷新）。
+3. final 文本由 runtime 清理 `<tool_output>` 后发出；final 为空时用本轮流式文本兜底。
+4. 错误可见性：`error/permission_denied/budget_exceeded` 事件照常透传，前端在正文渲染警示并把完成态标为"部分失败"。

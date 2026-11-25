@@ -103,7 +103,7 @@ def test_permission_whitelist_split():
     """shell_run 必须走审批；open_url 在 auto 白名单。"""
     import ast
 
-    src = (ROOT / "src/yoai/desktop/app.py").read_text(encoding="utf-8")
+    src = (ROOT / "src/yoai/bootstrap.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     allowed = None
     for node in ast.walk(tree):

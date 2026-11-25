@@ -89,34 +89,40 @@ def test_describe_shows_decision(tmp_path):
     assert d["expert_id"] == writer.id and d["decision"]["reason"]
 
 
-def test_worker_records_expert_id_from_provider(tmp_path):
-    """关键闭环：worker 落盘证据时 expert_id 来自真实路由决策。"""
+def test_evidence_records_expert_id_from_provider(tmp_path):
+    """关键闭环（Tauri runtime 同语义）：落盘证据时 expert_id 来自真实路由决策。
+
+    旧 PySide6 端 AgentWorker 已删；此测试直接驱动 astream +
+    ExecutionEvidenceCollector.finish（与 apps/desktop-tauri/runtime/
+    yoai_runtime.py 中的证据落盘逻辑一致）。
+    """
     from yai_core import ScriptedModel
     from yoai.agent import YoAiAgent
-    from yoai.desktop.worker import AgentWorker
-    from yoai.evidence import EvidenceStore
-    from PySide6.QtCore import QEventLoop, QTimer
-    from PySide6.QtWidgets import QApplication
+    from yoai.evidence import AttributionEngine, EvidenceStore, ExecutionEvidenceCollector
 
-    QApplication.instance() or QApplication([])
     ar, root, writer = _setup(tmp_path / "evo")
     base = ScriptedModel([ModelResponse(content="回答")])
     provider = ExpertModelProvider(base, ExpertRouter(ar), ar)
     agent = YoAiAgent(model=provider, data_dir=tmp_path)
     store = EvidenceStore(tmp_path / "ev.json")
-    worker = AgentWorker(
-        agent, "帮我写一篇总结", None,
-        evidence_store=store,
-        evidence_meta={
-            "session_id": "s", "task_fingerprint": "k",
-            "fingerprint_tags": ("writing",), "sample_class": "evolution",
-            "expert_id": None, "parent_id": None, "model_provider": provider,
-        },
+
+    collector = ExecutionEvidenceCollector()
+    async def _drive():
+        async for ev in agent.astream("帮我写一篇总结"):
+            collector.observe(ev)
+    asyncio.run(_drive())
+
+    evidence = collector.finish(
+        session_id="s", task="帮我写一篇总结", task_fingerprint="k",
+        fingerprint_tags=("writing",), sample_class="evolution",
+        expert_id=getattr(provider, "last_expert_id", None),
+        parent_id=getattr(provider, "last_parent_id", None),
+        usage_override=getattr(provider, "total_usage", None),
+        route_decision=(provider.last_decision.to_dict()
+                        if getattr(provider, "last_decision", None) else None),
     )
-    loop = QEventLoop()
-    timer = QTimer(); timer.setSingleShot(True); timer.timeout.connect(loop.quit); timer.start(5000)
-    worker.task_done.connect(lambda _: loop.quit())
-    worker.start(); loop.exec(); timer.stop(); worker.wait(2000)
+    store.add(evidence)
+    store.add_attribution(AttributionEngine(store).attribute(evidence))
 
     ev = store.query(task_fingerprint="k")[0]
     assert ev.expert_id == writer.id          # 真实专家 id 落盘

@@ -1,5 +1,7 @@
 /** Desktop IPC 协议 v1 的 TypeScript 类型。与 docs/IPC-PROTOCOL.md / runtime/protocol.py 一一对应。
- *  改协议必须同步改这三处。 */
+ *  改协议必须同步改这三处。
+ *  v1 扩展（会话管理/通讯/星图）：追加消息类型，旧消息不变。
+ */
 
 export const PROTOCOL_VERSION = 1;
 
@@ -25,7 +27,92 @@ export interface ReadyMsg extends BaseMsg {
 export interface SessionInfo {
   id: string;
   name: string;
-  updated_at?: string;
+  created_at?: string;
+  last_active?: string;
+}
+
+export interface HistoryEntry {
+  role: string;
+  text: string;
+}
+
+export interface GoalInfo {
+  id: string;
+  title: string;
+  status: string;
+}
+
+/** 会话全景（旧端主窗口侧栏数据源的等价物）。 */
+export interface SnapshotMsg extends BaseMsg {
+  type: "snapshot";
+  sessions: SessionInfo[];
+  current_id: string;
+  history: HistoryEntry[];
+  model: string;
+  facts: Record<string, string>;
+  goals: GoalInfo[];
+  write_stats: Record<string, number>;
+  tools: string[];
+}
+
+export interface ChatEntry {
+  sender: string;
+  name: string;
+  content: string;
+  own: boolean;
+}
+
+export interface ConversationInfo {
+  id: string;
+  name: string;
+  kind: "peer" | "group";
+  members: number;
+}
+
+export interface ExternalAgentInfo {
+  name: string;
+  level: string;
+  available: boolean;
+}
+
+export interface ChatStateMsg extends BaseMsg {
+  type: "chat.state";
+  conversations: ConversationInfo[];
+  external: ExternalAgentInfo[];
+  history_target?: string;
+  history?: ChatEntry[];
+}
+
+export interface ChatMsgMsg extends BaseMsg {
+  type: "chat.msg";
+  target: string;
+  sender: string;
+  name: string;
+  content: string;
+  own: boolean;
+  at?: string;
+}
+
+export interface ArchiveNode {
+  id: string;
+  name: string;
+  lifecycle: string;
+  version: number;
+  parent_id: string;
+  depth: number;
+  capability_tags: string[];
+  tools: string[];
+  strategy_bias: string;
+  model_tier: string;
+  diff: string;
+  evidence_count: number;
+  created_at: string;
+  prompt_suffix: string;
+}
+
+export interface ArchiveStateMsg extends BaseMsg {
+  type: "archive.state";
+  nodes: ArchiveNode[];
 }
 
 export interface StatusMsg extends BaseMsg {
@@ -81,15 +168,26 @@ export interface ErrorMsg extends BaseMsg {
 }
 
 export type RuntimeMsg =
-  | ReadyMsg | StatusMsg | EventMsg | FinalMsg | ApprovalRequestMsg | ErrorMsg;
+  | ReadyMsg | StatusMsg | EventMsg | FinalMsg | ApprovalRequestMsg | ErrorMsg
+  | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
   | { v: 1; type: "hello"; client: string; protocol: number }
   | { v: 1; type: "task.start"; task_id: string; run_id: string; input: string }
   | { v: 1; type: "task.cancel"; task_id: string; run_id: string }
-  | { v: 1; type: "session.list" }
+  | { v: 1; type: "session.state" }
+  | { v: 1; type: "session.create"; name: string }
   | { v: 1; type: "session.switch"; session_id: string }
+  | { v: 1; type: "session.rename"; session_id: string; name: string }
+  | { v: 1; type: "session.delete"; session_id: string }
+  | { v: 1; type: "chat.state" }
+  | { v: 1; type: "chat.history"; target: string }
+  | { v: 1; type: "chat.send"; target: string; text: string }
+  | { v: 1; type: "chat.new_group"; name: string }
+  | { v: 1; type: "chat.add_member"; target: string; peer_id: string }
+  | { v: 1; type: "chat.add_external"; target: string; name: string }
+  | { v: 1; type: "archive.get" }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

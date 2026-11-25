@@ -1,31 +1,53 @@
 /** YoAi 下一代桌面工作台（Tauri + React）。
- *  旧 PySide6 端保留不动——本目录是独立新工程。
+ *  完整对齐旧 PySide6 端能力：会话管理（切换/新建/重命名/删除）、
+ *  个人事实/长期目标/本轮记忆侧栏、错误可见（部分失败）、
+ *  模型 chip、纸墨主题切换、通讯页、星球系页。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "./lib/ipc";
 import { useTaskStream, type RunState } from "./hooks/useTaskStream";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { Markdown } from "./components/Markdown";
-import type { RuntimeMsg } from "./types/ipc";
+import { SideCards } from "./components/SideCards";
+import { CommsPage } from "./components/CommsPage";
+import { GalaxyPage } from "./components/GalaxyPage";
+import { ModalConfirm, ModalInput } from "./components/Dialog";
+import type { RuntimeMsg, SnapshotMsg } from "./types/ipc";
 
 const newId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-function toolCards(run: RunState) {
-  return run.events.filter((e) => e.name === "tool_call" || e.name === "tool_result");
-}
+const PAGE_TITLES: Record<string, string> = {
+  chat: "我的对话", comms: "通讯", galaxy: "星球系",
+};
 
+/** 旧端 _clean_final_text 已在 runtime 完成；这里只兜底空文本。 */
 function ChatRun({ run, streaming }: { run: RunState; streaming: boolean }) {
   const rounds = useMemo(() => [...run.streamText.entries()].sort((a, b) => a[0] - b[0]), [run.streamText]);
+  // 静默失败修复（对齐旧端 _task_had_error）：报错后的"完成"必须标出来
+  const hadError = run.events.some((e) =>
+    e.name === "error" || e.name === "permission_denied" || e.name === "budget_exceeded");
+  const stateText = run.state === "done" && hadError ? "部分失败" : run.state;
+
   return (
     <article className="chat-run">
       <header className="run-head">
         <span className="who">YoAi</span>
-        <span className="state" data-state={run.state}>{run.state}</span>
+        <span className="state" data-state={hadError && run.state === "done" ? "failed" : run.state}>
+          {stateText}
+        </span>
         <span className="run-time">{new Date(run.startedAt).toLocaleTimeString("zh-CN")}</span>
       </header>
 
       <ProcessPanel events={run.events} thinking={run.thinking} />
+
+      {/* 错误必须进正文（旧端静默失败修复语义） */}
+      {run.events.filter((e) => e.name === "error" || e.name === "permission_denied" || e.name === "budget_exceeded")
+        .map((e) => (
+          <div key={`err-${e.seq}`} className="run-error">
+            ⚠️ {String(e.data.error ?? e.data.reason ?? e.data.message ?? "执行出错")}
+          </div>
+        ))}
 
       {/* 流式文本：每轮一段；完成后以 final 定稿为准，避免重复 */}
       {streaming && rounds.map(([round, text]) => text && (
@@ -34,22 +56,12 @@ function ChatRun({ run, streaming }: { run: RunState; streaming: boolean }) {
 
       {run.finalText && <div className="final-answer"><Markdown text={run.finalText} /></div>}
 
-      {toolCards(run).length > 0 && (
-        <div className="tool-cards">
-          {toolCards(run).slice(-4).map((e) => (
-            <div key={e.seq} className={`tool-card ${e.name}`}>
-              <span className="tool-icon">{e.name === "tool_call" ? "→" : "←"}</span>
-              <span>{String(e.data.tool ?? "")}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {run.approval && (
         <div className="approval-box">
           <p>{run.approval.question} <code>{run.approval.tool}</code></p>
+          {run.approval.detail && <pre className="approval-detail">{run.approval.detail}</pre>}
           <div>
-            <button onClick={() => { void ipc.replyApproval(run.taskId, run.runId, true); }}>允许</button>
+            <button onClick={() => { void ipc.replyApproval(run.taskId, run.runId, true); }}>允许执行</button>
             <button onClick={() => { void ipc.replyApproval(run.taskId, run.runId, false); }}>拒绝</button>
           </div>
         </div>
@@ -58,31 +70,66 @@ function ChatRun({ run, streaming }: { run: RunState; streaming: boolean }) {
   );
 }
 
+function useTheme() {
+  const [theme, setTheme] = useState<"light" | "dark">(
+    () => (localStorage.getItem("yoai-theme") as "light" | "dark") || "light");
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("yoai-theme", theme);
+  }, [theme]);
+  return [theme, () => setTheme((t) => (t === "light" ? "dark" : "light"))] as const;
+}
+
 export default function App() {
   const [msgs, setMsgs] = useState<RuntimeMsg[]>([]);
   const [input, setInput] = useState("");
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [floating, setFloating] = useState(false);
-  const [specialist, setSpecialist] = useState("通用根");
-  const { runs, activeRunId, beginRun } = useTaskStream(msgs);
+  const [page, setPage] = useState<"chat" | "comms" | "galaxy">("chat");
+  const [snap, setSnap] = useState<SnapshotMsg | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dialog, setDialog] = useState<
+    | { kind: "rename"; sessionId: string; initial: string }
+    | { kind: "delete"; sessionId: string; name: string }
+    | null
+  >(null);
+  const [theme, toggleTheme] = useTheme();
+  const { runs, activeRunId, beginRun, resetRuns } = useTaskStream(msgs);
+  // 快照增量消费 + 会话切换检测
+  const procRef = useRef(0);
+  const currentIdRef = useRef("");
 
   useEffect(() => {
     const off = ipc.onMessage((m) => {
-      setMsgs((prev) => [...prev, m]);
       if (m.type === "ready") setReady(true);
-      if (m.type === "error") setErr(m.message);
+      if (m.type === "error" && m.stage === "startup") setErr(m.message);
     });
     void ipc.connect().catch((e) => setErr(String(e)));
     return () => { off(); void ipc.shutdown().catch(() => {}); };
   }, []);
+
+  // snapshot：更新会话/侧栏数据；current_id 变化时清空 run 视图
+  useEffect(() => {
+    if (msgs.length < procRef.current) procRef.current = 0;
+    const batch = msgs.slice(procRef.current);
+    procRef.current = msgs.length;
+    for (const m of batch) {
+      if (m.type !== "snapshot") continue;
+      if (m.current_id !== currentIdRef.current) {
+        currentIdRef.current = m.current_id;
+        resetRuns();
+      }
+      setSnap(m);
+    }
+  }, [msgs, resetRuns]);
 
   const send = useCallback(() => {
     const text = input.trim();
     if (!text || !ready) return;
     const taskId = newId("t"); const runId = newId("r");
     beginRun(taskId, runId, text);
-    setMsgs([]);  // 本轮视图切换到新 run；历史由 run Map 保留
+    setMsgs([]);   // 事件数组有界：新一轮从零开始（run 视图保留，历史由 snapshot 承担）
     void ipc.startTask(taskId, runId, text).catch((e) => setErr(String(e)));
     setInput("");
   }, [input, ready, beginRun]);
@@ -93,7 +140,17 @@ export default function App() {
   }, [runs, activeRunId]);
 
   const active = runs.get(activeRunId);
+  const busy = active?.state === "running";
   const runList = useMemo(() => [...runs.values()], [runs]);
+  const sessions = snap?.sessions ?? [];
+  const currentSession = sessions.find((s) => s.id === snap?.current_id);
+
+  const sessionLabel = useCallback((s: { name: string; created_at?: string }) => {
+    if (!s.created_at) return s.name;
+    const d = new Date(s.created_at);
+    if (Number.isNaN(d.getTime())) return s.name;
+    return `${s.name} · ${String(d.getMonth() + 1).padStart(2, "0")}月${String(d.getDate()).padStart(2, "0")}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }, []);
 
   if (floating) {
     return (
@@ -106,46 +163,115 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">YoAi <span className="tag">工作台</span></div>
-        <div className="top-actions">
-          <select value={specialist} onChange={(e) => setSpecialist(e.target.value)} title="专员切换">
-            <option>通用根</option><option>写作</option><option>研究</option>
-          </select>
-          <button onClick={() => setFloating(true)} title="切换悬浮模式">◱ 悬浮</button>
-        </div>
-      </header>
+      <nav className="nav-rail">
+        <button className={`nav-item ${page === "chat" ? "active" : ""}`} title="我的对话"
+                onClick={() => setPage("chat")}>对话</button>
+        <button className={`nav-item ${page === "comms" ? "active" : ""}`} title="通讯"
+                onClick={() => setPage("comms")}>通讯</button>
+        <button className={`nav-item ${page === "galaxy" ? "active" : ""}`} title="星球系"
+                onClick={() => setPage("galaxy")}>星球</button>
+        <div className="nav-spacer" />
+        <button className="nav-item ghost" title="切换纸墨主题" onClick={toggleTheme}>
+          {theme === "light" ? "墨" : "纸"}
+        </button>
+        <button className="nav-item ghost" title="切换悬浮模式" onClick={() => setFloating(true)}>◱</button>
+      </nav>
 
-      {err && <div className="error-bar">⚠ {err}</div>}
-      {!ready && <div className="boot-bar">正在连接 Python Runtime…</div>}
-
-      <main className="workspace">
-        <div className="chat-scroll">
-          {runList.length === 0 && (
-            <div className="empty">输入一个任务，开始与 YoAi 对话。</div>
-          )}
-          {runList.map((run) => (
-            <div key={run.runId}>
-              <div className="user-msg">{run.input}</div>
-              <ChatRun run={run} streaming={run.runId === activeRunId} />
+      <div className="main-col">
+        <header className="topbar">
+          <div className="page-title">{PAGE_TITLES[page]}</div>
+          {page === "chat" && (
+            <div className="session-bar">
+              <select value={snap?.current_id ?? ""}
+                      disabled={busy || sessions.length === 0}
+                      title="切换会话"
+                      onChange={(e) => { if (e.target.value) void ipc.switchSession(e.target.value); }}>
+                {sessions.length === 0 && <option value="">（无会话）</option>}
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>{sessionLabel(s)}</option>
+                ))}
+              </select>
+              <button className="ghost" disabled={busy} onClick={() => { void ipc.createSession("新会话"); }}>＋ 新建</button>
+              <div className="menu-wrap">
+                <button className="ghost" disabled={busy || !currentSession}
+                        onClick={() => setMenuOpen((v) => !v)}>管理</button>
+                {menuOpen && currentSession && (
+                  <div className="menu-pop" onMouseLeave={() => setMenuOpen(false)}>
+                    <button onClick={() => { setMenuOpen(false); setDialog({ kind: "rename", sessionId: currentSession.id, initial: currentSession.name }); }}>重命名会话</button>
+                    <button onClick={() => { setMenuOpen(false); setDialog({ kind: "delete", sessionId: currentSession.id, name: currentSession.name }); }}>删除会话…</button>
+                  </div>
+                )}
+              </div>
             </div>
-          ))}
-        </div>
-
-        <div className="composer">
-          <textarea value={input} onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                    placeholder="输入任务…（Enter 发送，Shift+Enter 换行）" rows={2} />
-          <div className="composer-actions">
-            <span className="status-pill" data-state={active?.state ?? "idle"}>
-              {active?.state ?? "待命"} · {specialist}
+          )}
+          <div className="top-right">
+            <span className="model-chip" title="当前模型">模型 · {snap?.model ?? "…"}</span>
+            <span className="state" data-state={active?.state ?? "idle"}>
+              {busy ? "执行中" : active?.state === "done" ? "已完成" : active?.state === "failed" ? "失败" : "就绪"}
             </span>
-            {active?.state === "running"
-              ? <button className="stop" onClick={cancel}>■ 停止</button>
-              : <button className="send" onClick={send} disabled={!ready || !input.trim()}>发送 →</button>}
           </div>
-        </div>
-      </main>
+        </header>
+
+        {err && <div className="error-bar">⚠ {err}</div>}
+        {!ready && <div className="boot-bar">正在连接 Python Runtime…</div>}
+
+        {page === "chat" && (
+          <main className="chat-layout">
+            <div className="chat-col">
+              <div className="chat-scroll">
+                {/* 历史消息（当前会话持久化历史） */}
+                {(snap?.history ?? []).map((h, i) => (
+                  h.role === "user"
+                    ? <div key={`h${i}`} className="user-msg">{h.text}</div>
+                    : <article key={`h${i}`} className="chat-run history-run">
+                        <header className="run-head"><span className="who">YoAi</span></header>
+                        <div className="final-answer"><Markdown text={h.text} /></div>
+                      </article>
+                ))}
+                {runList.length === 0 && (snap?.history ?? []).length === 0 && (
+                  <div className="empty">输入一个任务，开始与 YoAi 对话。</div>
+                )}
+                {runList.map((run) => (
+                  <div key={run.runId}>
+                    <div className="user-msg">{run.input}</div>
+                    <ChatRun run={run} streaming={run.runId === activeRunId} />
+                  </div>
+                ))}
+              </div>
+
+              <div className="composer">
+                <textarea value={input} onChange={(e) => setInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                          placeholder="输入任务…（Enter 发送，Shift+Enter 换行）" rows={2} />
+                <div className="composer-actions">
+                  <span className="status-pill" data-state={active?.state ?? "idle"}>
+                    {active?.state ?? "待命"} · {snap?.model ?? "…"}
+                  </span>
+                  {busy
+                    ? <button className="stop" onClick={cancel}>■ 停止</button>
+                    : <button className="send" onClick={send} disabled={!ready || !input.trim()}>发送 →</button>}
+                </div>
+              </div>
+            </div>
+            <SideCards snap={snap} />
+          </main>
+        )}
+
+        {page === "comms" && <CommsPage />}
+        {page === "galaxy" && <GalaxyPage />}
+      </div>
+
+      {dialog?.kind === "rename" && (
+        <ModalInput title="重命名会话" placeholder="会话名称" initial={dialog.initial}
+                    onCancel={() => setDialog(null)}
+                    onOk={(name) => { void ipc.renameSession(dialog.sessionId, name); setDialog(null); }} />
+      )}
+      {dialog?.kind === "delete" && (
+        <ModalConfirm title="删除会话" text={`从列表删除「${dialog.name}」？`}
+                     detail="本地历史文件会保留。" okLabel="删除"
+                     onCancel={() => setDialog(null)}
+                     onOk={() => { void ipc.deleteSession(dialog.sessionId); setDialog(null); }} />
+      )}
     </div>
   );
 }

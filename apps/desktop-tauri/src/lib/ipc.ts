@@ -83,6 +83,48 @@ export class IpcClient {
     await this.send({ v: PROTOCOL_VERSION, type: "approval.reply", task_id: taskId, run_id: runId, allow });
   }
 
+  // ---- v1 扩展：会话管理 ----
+  async refreshSession(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "session.state" });
+  }
+  async createSession(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "session.create", name });
+  }
+  async switchSession(sessionId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "session.switch", session_id: sessionId });
+  }
+  async renameSession(sessionId: string, name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "session.rename", session_id: sessionId, name });
+  }
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "session.delete", session_id: sessionId });
+  }
+
+  // ---- v1 扩展：通讯 ----
+  async chatState(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "chat.state" });
+  }
+  async chatHistory(target: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "chat.history", target });
+  }
+  async chatSend(target: string, text: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "chat.send", target, text });
+  }
+  async chatNewGroup(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "chat.new_group", name });
+  }
+  async chatAddMember(target: string, peerId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "chat.add_member", target, peer_id: peerId });
+  }
+  async chatAddExternal(target: string, name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "chat.add_external", target, name });
+  }
+
+  // ---- v1 扩展：星图 ----
+  async getArchive(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "archive.get" });
+  }
+
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });
     this.disconnect();

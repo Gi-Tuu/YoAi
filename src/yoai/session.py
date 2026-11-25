@@ -147,6 +147,20 @@ class SessionManager:
         self._save_index()
         return True
 
+    def rename(self, session_id: str, name: str) -> bool:
+        session = self.get(session_id)
+        name = name.strip()
+        if session is None or not name:
+            return False
+        previous = session.name
+        session.name = name
+        try:
+            self._save_index()
+        except OSError:
+            session.name = previous
+            raise
+        return True
+
     def delete(self, session_id: str) -> bool:
         if session_id not in self._sessions:
             return False
