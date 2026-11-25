@@ -49,17 +49,24 @@ export class IpcClient {
       if (this.seen.size > 100000) this.seen.clear();
     }
     this.queue.push(msg);
+    // 流式 delta/thinking 立即上屏（逐 token 可见）；其他高频事件走 rAF 批量。
+    if ((msg as { type?: string; event?: string }).type === "event" &&
+        ["delta", "thinking"].includes((msg as { event?: string }).event ?? "")) {
+      this.flushNow();
+      return;
+    }
     if (this.flushScheduled) return;
     this.flushScheduled = true;
-    const flush = () => {
-      this.flushScheduled = false;
-      const batch = this.queue;
-      this.queue = [];
-      for (const m of batch) for (const l of this.listeners) l(m);
-    };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
-    else setTimeout(flush, 0);
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(this.flushNow);
+    else setTimeout(this.flushNow, 0);
   }
+
+  private flushNow = (): void => {
+    this.flushScheduled = false;
+    const batch = this.queue;
+    this.queue = [];
+    for (const m of batch) for (const l of this.listeners) l(m);
+  };
 
   /** 直接喂一条消息（测试/模拟用，跳过 Tauri 传输）。 */
   inject(msg: RuntimeMsg): void {

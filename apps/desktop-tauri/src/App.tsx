@@ -41,7 +41,9 @@ function HistoryRun({ text, thinking }: { text: string; thinking?: ThinkingRecor
   );
 }
 
-function ChatRun({ run, streaming }: { run: RunState; streaming: boolean }) {
+function ChatRun({ run, streaming, onApproval }: {
+  run: RunState; streaming: boolean; onApproval: (runId: string, allow: boolean) => void;
+}) {
   const rounds = useMemo(() => [...run.streamText.entries()].sort((a, b) => a[0] - b[0]), [run.streamText]);
   // 静默失败修复（对齐旧端 _task_had_error）：报错后的"完成"必须标出来
   const hadError = run.events.some((e) =>
@@ -80,8 +82,8 @@ function ChatRun({ run, streaming }: { run: RunState; streaming: boolean }) {
           <p>{run.approval.question} <code>{run.approval.tool}</code></p>
           {run.approval.detail && <pre className="approval-detail">{run.approval.detail}</pre>}
           <div>
-            <button onClick={() => { void ipc.replyApproval(run.taskId, run.runId, true); }}>允许执行</button>
-            <button onClick={() => { void ipc.replyApproval(run.taskId, run.runId, false); }}>拒绝</button>
+            <button onClick={() => onApproval(run.runId, true)}>允许执行</button>
+            <button onClick={() => onApproval(run.runId, false)}>拒绝</button>
           </div>
         </div>
       )}
@@ -114,10 +116,25 @@ export default function App() {
     | null
   >(null);
   const [theme, toggleTheme] = useTheme();
-  const { runs, activeRunId, beginRun, resetRuns } = useTaskStream(msgs);
+  const { runs, activeRunId, beginRun, clearApproval, resetRuns } = useTaskStream(msgs);
   // 快照增量消费 + 会话切换检测
   const procRef = useRef(0);
   const currentIdRef = useRef("");
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const stickBottomRef = useRef(true);   // 用户是否在底部（主动上滚则暂停自动跟随）
+
+  // 滚动跟随：内容变化/切会话/发消息时滚底；用户主动上滚时不打扰
+  const scrollToBottom = useCallback((force = false) => {
+    const el = chatScrollRef.current;
+    if (!el || (!force && !stickBottomRef.current)) return;
+    el.scrollTop = el.scrollHeight;
+    stickBottomRef.current = true;
+  }, []);
+  const onChatScroll = useCallback(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    stickBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  }, []);
 
   useEffect(() => {
     const off = ipc.onMessage((m) => {
@@ -139,8 +156,11 @@ export default function App() {
       if (m.current_id !== currentIdRef.current) {
         currentIdRef.current = m.current_id;
         resetRuns();
+        stickBottomRef.current = true;
+        requestAnimationFrame(() => scrollToBottom(true));  // 切会话回到最新消息
       }
       setSnap(m);
+      requestAnimationFrame(() => scrollToBottom());
     }
   }, [msgs, resetRuns]);
 
@@ -150,9 +170,16 @@ export default function App() {
     const taskId = newId("t"); const runId = newId("r");
     beginRun(taskId, runId, text);
     setMsgs([]);   // 事件数组有界：新一轮从零开始（run 视图保留，历史由 snapshot 承担）
+    stickBottomRef.current = true;
+    requestAnimationFrame(() => scrollToBottom(true));   // 发消息跳到底部
     void ipc.startTask(taskId, runId, text).catch((e) => setErr(String(e)));
     setInput("");
-  }, [input, ready, beginRun]);
+  }, [input, ready, beginRun, scrollToBottom]);
+
+  // 流式 token 到达时跟随底部（用户在顶部看历史时不打扰）
+  const streamTick = [...runs.values()].map((r) =>
+    `${r.state}:${[...r.streamText.values()].reduce((n, t) => n + t.length, 0)}:${r.finalText.length}`).join("|");
+  useEffect(() => { requestAnimationFrame(() => scrollToBottom()); }, [streamTick, scrollToBottom]);
 
   const cancel = useCallback(() => {
     const run = runs.get(activeRunId);
@@ -238,7 +265,7 @@ export default function App() {
         {page === "chat" && (
           <main className="chat-layout">
             <div className="chat-col">
-              <div className="chat-scroll">
+              <div className="chat-scroll" ref={chatScrollRef} onScroll={onChatScroll}>
                 {/* 历史消息（当前会话持久化历史） */}
                 {(snap?.history ?? []).map((h, i, arr) => {
                   if (h.role === "user") return <div key={`h${i}`} className="user-msg">{h.text}</div>;
@@ -254,7 +281,12 @@ export default function App() {
                 {runList.map((run) => (
                   <div key={run.runId}>
                     <div className="user-msg">{run.input}</div>
-                    <ChatRun run={run} streaming={run.runId === activeRunId} />
+                    <ChatRun run={run} streaming={run.runId === activeRunId}
+                             onApproval={(runId, allow) => {
+                               clearApproval(runId);   // 点了立即消失
+                               void ipc.replyApproval(run.taskId, run.runId, allow)
+                                 .catch((e) => setErr(String(e)));
+                             }} />
                   </div>
                 ))}
               </div>

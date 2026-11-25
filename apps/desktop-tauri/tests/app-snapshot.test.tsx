@@ -83,3 +83,21 @@ describe("历史消息 thinking 显示", () => {
     expect(screen.getByText(/用户说叫小明/)).toBeTruthy();
   });
 });
+
+describe("审批弹窗交互（hook 级）", () => {
+  it("clearApproval 清除审批状态（点击后消失的数据层保证）", async () => {
+    // useTaskStream 的 clearApproval 是点击后消失的核心保证；
+    // 组件接线在 App.tsx onApproval 回调里（clearApproval → replyApproval）
+    const { renderHook, act } = await import("@testing-library/react");
+    const { useTaskStream } = await import("../src/hooks/useTaskStream");
+    const msgs = [{
+      v: 1, type: "approval.request", task_id: "t1", run_id: "r1", seq: 1,
+      tool: "request_capability", question: "确认执行?", detail: "{}",
+    }];
+    const { result } = renderHook(() => useTaskStream(msgs as never));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(result.current.runs.get("r1")?.approval?.tool).toBe("request_capability");
+    await act(async () => { result.current.clearApproval("r1"); });
+    expect(result.current.runs.get("r1")?.approval).toBeNull();
+  });
+});

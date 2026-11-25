@@ -100,8 +100,9 @@ export function useTaskStream(messages: RuntimeMsg[]) {
       processed.current = messages.length;
     }
     if (timer.current === null) {
-      // 首帧立即 flush（首个可见更新不缓存），后续高频用 16ms 节流
-      timer.current = window.setTimeout(flush, messages.length <= 2 ? 0 : 16);
+      // 立即 flush：ipc 层已用 requestAnimationFrame 批量（每帧一次），
+      // 这里再加 16ms 节流会让流式 token 攒成一段蹦出来——去掉。
+      timer.current = window.setTimeout(flush, 0);
     }
     return () => { /* timer 跨消息存活，由 flush 自清 */ };
   }, [messages, flush]);

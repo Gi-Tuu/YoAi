@@ -315,3 +315,17 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
   font-size: var(--fs-note); color: var(--accent); cursor: pointer; text-align: left;
 }
 .history-think .think-link:hover { color: var(--ink); }
+
+/* 滚动条：对齐纸墨/墨纸设计——零圆角、1px 描边、纯色面，替换系统默认 */
+.chat-scroll, .process-scroll, .side-cards, .comms-list, .comms-external,
+.comms-scroll, .galaxy-detail, .think-block, .modal-options, .side-card-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--rule); border: 3px solid var(--bg); border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+::-webkit-scrollbar-corner { background: transparent; }
