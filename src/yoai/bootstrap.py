@@ -10,6 +10,57 @@ import os
 from pathlib import Path
 
 
+"""权限档位：UI 三档 → Core AllowlistPolicy（内核零改动、热切换只改属性）。
+
+- full  允许完全访问：mode=allow_all，所有工具自动执行
+- smart 智能访问（默认）：mode=auto + 白名单，只读/记忆类自动、写类弹窗
+- manual 手批访问：mode=auto + 空白名单，每个工具都弹窗确认
+"""
+PERMISSION_LEVELS = ("full", "smart", "manual")
+
+
+def apply_permission_level(policy: Any, level: str) -> str:
+    """就地改 policy 的 mode/allowed（与 Core executor 共享同一对象引用）。"""
+    from yai_core.policy import AllowlistPolicy
+
+    if level not in PERMISSION_LEVELS:
+        return f"未知权限档位: {level}"
+    if not isinstance(policy, AllowlistPolicy):
+        return "当前策略不支持档位切换"
+    if level == "full":
+        policy.mode = "allow_all"
+        policy.allowed = set()
+    elif level == "smart":
+        policy.mode = "auto"
+        policy.allowed = set(_SMART_ALLOWED)
+    else:  # manual
+        policy.mode = "auto"
+        policy.allowed = set()
+    return ""
+
+
+_SMART_ALLOWED = {
+    "all_topics", "events_between", "facts_by_tag", "list_facts", "list_goals",
+    "recall_fact", "related_events", "summarize_theme",
+    "file_list", "file_read", "web_search", "web_fetch", "open_url",
+    "remember_event", "remember_fact", "create_goal", "complete_goal",
+    "now", "recent_events", "list_tools",
+    "file_ro_list", "file_ro_read",
+}
+
+
+def permission_level_of(policy: Any) -> str:
+    """从当前 policy 反推档位（用于 UI 显示）。"""
+    from yai_core.policy import AllowlistPolicy
+    if not isinstance(policy, AllowlistPolicy):
+        return "smart"
+    if policy.mode == "allow_all":
+        return "full"
+    if policy.mode == "auto" and policy.allowed:
+        return "smart"
+    return "manual"
+
+
 def agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) -> dict:
     """桌面端 agent 构造参数：实操工具默认开，YOAI_BUILTIN_TOOLS=0 可关。
 
@@ -28,14 +79,21 @@ def agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) -> 
         if roots:
             kwargs["readonly_roots"] = roots
 
-    # 权限档位（Core 三档 allow_all / auto / deny_all）：
-    # - 默认 auto：白名单内放行，文件写等白名单外工具弹窗确认
-    # - YOAI_PERMISSION_MODE=allow_all：全部自动放行，不弹窗（临时测试/信任环境）
-    # - 无头自检强制 allow_all：无人点弹窗
+    # 权限档位优先级：用户 UI 设置（config.json） > 环境变量 > 默认 smart。
+    # 必须在构造时生效——切会话时 SessionManager 会重建 agent。
+    from yoai.user_config import UserConfig
     from yai_core.policy import AllowlistPolicy
+    level = UserConfig(data_dir).permission_level() if data_dir is not None else ""
     env_mode = os.environ.get("YOAI_PERMISSION_MODE", "").strip().lower()
-    if auto_approve or env_mode == "allow_all":
+    if level == "full" or auto_approve or env_mode == "allow_all":
         kwargs["policy"] = AllowlistPolicy(mode="allow_all")
+        if channel is not None:
+            kwargs["channel"] = channel
+        return kwargs
+    if level == "manual":
+        kwargs["policy"] = AllowlistPolicy(mode="auto", allowed=())
+        if channel is not None:
+            kwargs["channel"] = channel
         return kwargs
     readonly_and_internal = {
         "all_topics", "events_between", "facts_by_tag", "list_facts", "list_goals",

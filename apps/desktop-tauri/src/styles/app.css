@@ -329,3 +329,19 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+/* 权限档位控件：零圆角、1px 描边，档位色标区分风险等级 */
+.perm-control {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-note); color: var(--dim);
+}
+.perm-control select {
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 0;
+  padding: 3px 8px; font-size: var(--fs-note);
+  font-family: var(--font); cursor: pointer;
+}
+.perm-control select:focus { border-color: var(--brick); outline: none; }
+.perm-control select[data-level="full"] { border-left: 3px solid var(--vermilion); }
+.perm-control select[data-level="smart"] { border-left: 3px solid var(--ok); }
+.perm-control select[data-level="manual"] { border-left: 3px solid var(--warn); }

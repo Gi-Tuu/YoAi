@@ -62,7 +62,8 @@ for _p in _candidates:
 
 from protocol import (  # noqa: E402  (自举后导入)
     PROTOCOL_VERSION, Seq, approval_request, archive_state, chat_msg,
-    chat_state, encode, error, event, final, ready, snapshot, status,
+    chat_state, encode, error, event, final, permission_state, ready,
+    snapshot, status,
 )
 
 
@@ -256,6 +257,24 @@ class Runtime:
             tools=tools,
             thinking_log=thinking_log,
         )
+
+    async def _push_permission_state(self) -> None:
+        """推当前权限档位给前端（UI 控件显示）。"""
+        from yoai.bootstrap import permission_level_of
+        from yoai.user_config import UserConfig
+        level = ""
+        if self.agent is not None:
+            policy = getattr(getattr(self.agent, "core", None), "policy", None)
+            level = permission_level_of(policy)
+        if not level:
+            level = UserConfig(_data_dir()).permission_level() or "smart"
+        descriptions = {
+            "full": "允许完全访问：所有工具自动执行，不弹窗",
+            "smart": "智能访问：只读/记忆类自动放行，写操作弹窗确认",
+            "manual": "手批访问：每个工具调用都弹窗确认",
+        }
+        await self.send(permission_state(
+            level=level, description=descriptions.get(level, "")))
 
     async def _push_snapshot(self) -> None:
         await self.send(self._snapshot())
@@ -528,6 +547,7 @@ class Runtime:
                                   python=sys.version.split()[0]))
             await self._push_snapshot()
             await self._push_chat_state()
+            await self._push_permission_state()
         elif typ == "task.start":
             await self.start_task(task_id, run_id, str(cmd.get("input", "")))
         elif typ == "task.cancel":
@@ -551,6 +571,16 @@ class Runtime:
             self._ensure_agent()
             self.sessions.switch(str(cmd.get("session_id", "")))
             self.agent = self.sessions.current_agent()
+            # 权限档位是全局设置：切会话时同步到目标 agent（它可能缓存旧 policy）
+            try:
+                from yoai.bootstrap import apply_permission_level, permission_level_of
+                from yoai.user_config import UserConfig
+                policy = getattr(self.agent.core, "policy", None)
+                stored = UserConfig(_data_dir()).permission_level()
+                if stored and policy is not None:
+                    apply_permission_level(policy, stored)
+            except Exception as exc:  # noqa: BLE001
+                _log(f"permission sync on switch failed: {exc}")
             await self._push_snapshot()
         elif typ == "session.rename":
             ok = self.sessions.rename(str(cmd.get("session_id", "")),
@@ -594,6 +624,25 @@ class Runtime:
         elif typ == "archive.get":
             self._ensure_agent()
             await self.send(self._archive_state())
+        elif typ == "permission.get":
+            self._ensure_agent()
+            await self._push_permission_state()
+        elif typ == "permission.set":
+            self._ensure_agent()
+            level = str(cmd.get("level", "")).strip().lower()
+            from yoai.bootstrap import PERMISSION_LEVELS, apply_permission_level
+            from yoai.user_config import UserConfig
+            if level not in PERMISSION_LEVELS:
+                await self.send(error("protocol", f"未知权限档位: {level}"))
+            else:
+                policy = getattr(getattr(self.agent, "core", None), "policy", None)
+                err = apply_permission_level(policy, level) if policy is not None else "agent 无策略对象"
+                if err:
+                    await self.send(error("protocol", err))
+                else:
+                    UserConfig(_data_dir()).save({"permission_level": level})
+                    # 切会话后重建的 agent 也从 config 读档位，保持跨会话一致
+                    await self._push_permission_state()
         elif typ == "shutdown":
             for task in list(self.tasks.values()):
                 task.cancel()

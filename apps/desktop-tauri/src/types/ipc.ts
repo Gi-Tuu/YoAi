@@ -124,6 +124,14 @@ export interface ArchiveStateMsg extends BaseMsg {
   nodes: ArchiveNode[];
 }
 
+export type PermissionLevel = "full" | "smart" | "manual";
+
+export interface PermissionStateMsg extends BaseMsg {
+  type: "permission.state";
+  level: PermissionLevel;
+  description: string;
+}
+
 export interface StatusMsg extends BaseMsg {
   type: "status";
   task_id: string;
@@ -178,7 +186,7 @@ export interface ErrorMsg extends BaseMsg {
 
 export type RuntimeMsg =
   | ReadyMsg | StatusMsg | EventMsg | FinalMsg | ApprovalRequestMsg | ErrorMsg
-  | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg;
+  | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg | PermissionStateMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -197,6 +205,8 @@ export type Command =
   | { v: 1; type: "chat.add_member"; target: string; peer_id: string }
   | { v: 1; type: "chat.add_external"; target: string; name: string }
   | { v: 1; type: "archive.get" }
+  | { v: 1; type: "permission.get" }
+  | { v: 1; type: "permission.set"; level: PermissionLevel }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

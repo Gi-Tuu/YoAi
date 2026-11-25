@@ -132,6 +132,14 @@ export class IpcClient {
     await this.send({ v: PROTOCOL_VERSION, type: "archive.get" });
   }
 
+  // ---- v1 扩展：权限档位 ----
+  async getPermission(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "permission.get" });
+  }
+  async setPermission(level: "full" | "smart" | "manual"): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "permission.set", level });
+  }
+
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });
     this.disconnect();

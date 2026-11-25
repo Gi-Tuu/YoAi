@@ -13,7 +13,7 @@ import { SideCards } from "./components/SideCards";
 import { CommsPage } from "./components/CommsPage";
 import { GalaxyPage } from "./components/GalaxyPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
-import type { RuntimeMsg, SnapshotMsg, ThinkingRecord } from "./types/ipc";
+import type { RuntimeMsg, SnapshotMsg, ThinkingRecord, PermissionLevel } from "./types/ipc";
 
 const newId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -109,6 +109,9 @@ export default function App() {
   const [floating, setFloating] = useState(false);
   const [page, setPage] = useState<"chat" | "comms" | "galaxy">("chat");
   const [snap, setSnap] = useState<SnapshotMsg | null>(null);
+  const [permission, setPermission] = useState<{
+    level: PermissionLevel; description: string;
+  }>({ level: "smart", description: "" });
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<
     | { kind: "rename"; sessionId: string; initial: string }
@@ -141,6 +144,9 @@ export default function App() {
       setMsgs((prev) => [...prev, m]);   // 所有 runtime 消息进入消费队列
       if (m.type === "ready") setReady(true);
       if (m.type === "error" && m.stage === "startup") setErr(m.message);
+      if (m.type === "permission.state") {
+        setPermission({ level: m.level, description: m.description });
+      }
     });
     void ipc.connect().catch((e) => setErr(String(e)));
     return () => { off(); void ipc.shutdown().catch(() => {}); };
@@ -253,6 +259,19 @@ export default function App() {
           )}
           <div className="top-right">
             <span className="model-chip" title="当前模型">模型 · {snap?.model ?? "…"}</span>
+            <label className="perm-control" title={permission.description}>
+              <span>权限</span>
+              <select value={permission.level}
+                      data-level={permission.level}
+                      onChange={(e) => {
+                        const level = e.target.value as PermissionLevel;
+                        void ipc.setPermission(level).catch((err) => setErr(String(err)));
+                      }}>
+                <option value="full">允许完全访问</option>
+                <option value="smart">智能访问</option>
+                <option value="manual">手批访问</option>
+              </select>
+            </label>
             <span className="state" data-state={active?.state ?? "idle"}>
               {busy ? "执行中" : active?.state === "done" ? "已完成" : active?.state === "failed" ? "失败" : "就绪"}
             </span>

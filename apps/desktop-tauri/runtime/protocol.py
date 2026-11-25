@@ -123,3 +123,11 @@ def archive_state(*, nodes: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "v": PROTOCOL_VERSION, "type": "archive.state", "nodes": nodes,
     }
+
+
+def permission_state(*, level: str, description: str) -> dict[str, Any]:
+    """当前权限档位（三档：full/smart/manual）。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "permission.state",
+        "level": level, "description": description,
+    }
