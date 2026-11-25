@@ -258,16 +258,53 @@ class Runtime:
             thinking_log=thinking_log,
         )
 
+    def _session_id(self) -> str:
+        current = getattr(self.sessions, "current", None) if self.sessions else None
+        return str(current.id) if current else ""
+
+    def _sync_permission_for_session(self, agent: Any = None, *, is_new: bool = False) -> str:
+        """把指定 agent 的 policy 设为「该会话自己的」档位，返回档位名。
+
+        按会话独立：每个 session 首次使用时把初始档位固化为自己的，
+        之后各会话改档互不影响。is_new=True 时初始值取全局默认（不继承上一会话）。
+        """
+        from yoai.bootstrap import apply_permission_level, permission_level_of
+        from yoai.user_config import UserConfig
+
+        target = agent if agent is not None else self.agent
+        policy = getattr(getattr(target, "core", None), "policy", None)
+        if policy is None:
+            return ""
+        # 防止改到 SessionManager 共享的 policy 模板（新会话会继承）
+        import copy as _copy
+        policy = _copy.copy(policy)
+        target.core.policy = policy
+        executor = getattr(target.core, "executor", None)
+        if executor is not None:
+            executor.policy = policy
+        cfg = UserConfig(_data_dir())
+        sid = self._session_id()
+        if not sid:
+            return permission_level_of(policy)
+        level = cfg.permission_level(sid)
+        if not level:
+            # 未存过：优先全局默认；没有全局默认时用当前 policy（由环境变量/
+            # 构造参数决定）作为初始值。create 时 agent 是全新的，policy 本就
+            # 是环境默认，不会继承另一个会话改过的档位。
+            level = cfg.default_level() or permission_level_of(policy) or "smart"
+            cfg.apply_default_to(sid, level)
+        apply_permission_level(policy, level)
+        return level
+
     async def _push_permission_state(self) -> None:
-        """推当前权限档位给前端（UI 控件显示）。"""
+        """推当前会话的权限档位给前端（UI 控件显示）。"""
         from yoai.bootstrap import permission_level_of
         from yoai.user_config import UserConfig
-        level = ""
-        if self.agent is not None:
-            policy = getattr(getattr(self.agent, "core", None), "policy", None)
-            level = permission_level_of(policy)
+        level = self._sync_permission_for_session()
         if not level:
-            level = UserConfig(_data_dir()).permission_level() or "smart"
+            level = permission_level_of(
+                getattr(getattr(self.agent, "core", None), "policy", None)) or \
+                UserConfig(_data_dir()).default_level() or "smart"
         descriptions = {
             "full": "允许完全访问：所有工具自动执行，不弹窗",
             "smart": "智能访问：只读/记忆类自动放行，写操作弹窗确认",
@@ -566,22 +603,21 @@ class Runtime:
         elif typ == "session.create":
             self._ensure_agent()
             self.sessions.create(str(cmd.get("name", "")) or "新会话")
+            self.agent = self.sessions.current_agent()
+            self._sync_permission_for_session(self.agent)   # 新会话固化自己的初始档位
             await self._push_snapshot()
+            await self._push_permission_state()
         elif typ == "session.switch":
             self._ensure_agent()
             self.sessions.switch(str(cmd.get("session_id", "")))
             self.agent = self.sessions.current_agent()
-            # 权限档位是全局设置：切会话时同步到目标 agent（它可能缓存旧 policy）
+            # 档位按会话独立：切换到目标会话时应用它自己的档位
             try:
-                from yoai.bootstrap import apply_permission_level, permission_level_of
-                from yoai.user_config import UserConfig
-                policy = getattr(self.agent.core, "policy", None)
-                stored = UserConfig(_data_dir()).permission_level()
-                if stored and policy is not None:
-                    apply_permission_level(policy, stored)
+                self._sync_permission_for_session(self.agent)
             except Exception as exc:  # noqa: BLE001
                 _log(f"permission sync on switch failed: {exc}")
             await self._push_snapshot()
+            await self._push_permission_state()
         elif typ == "session.rename":
             ok = self.sessions.rename(str(cmd.get("session_id", "")),
                                       str(cmd.get("name", "")))
@@ -636,12 +672,24 @@ class Runtime:
                 await self.send(error("protocol", f"未知权限档位: {level}"))
             else:
                 policy = getattr(getattr(self.agent, "core", None), "policy", None)
+                # SessionManager 的 agent_kwargs 里 policy 是所有会话共享的引用——
+                # 必须先复制，否则改当前会话会污染模板、新会话继承旧档位。
+                if policy is not None:
+                    import copy as _copy
+                    policy = _copy.copy(policy)
+                    self.agent.core.policy = policy
+                    executor = getattr(self.agent.core, "executor", None)
+                    if executor is not None:
+                        executor.policy = policy
                 err = apply_permission_level(policy, level) if policy is not None else "agent 无策略对象"
                 if err:
                     await self.send(error("protocol", err))
                 else:
-                    UserConfig(_data_dir()).save({"permission_level": level})
-                    # 切会话后重建的 agent 也从 config 读档位，保持跨会话一致
+                    from yoai.user_config import UserConfig
+                    cfg = UserConfig(_data_dir())
+                    sid = self._session_id()
+                    # 只改当前会话；全局默认不变（新会话仍沿用原默认）
+                    cfg.set_permission(sid, level)
                     await self._push_permission_state()
         elif typ == "shutdown":
             for task in list(self.tasks.values()):

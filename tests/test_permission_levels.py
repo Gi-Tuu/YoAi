@@ -48,24 +48,39 @@ def test_permission_decisions_match_levels():
     assert asyncio.run(decide("manual", "remember_fact")) == PD.ASK
 
 
-def test_user_config_persist_and_agent_kwargs(tmp_path):
-    """档位落 config.json 后，重建 agent 的构造参数也生效（跨会话关键）。"""
+def test_user_config_per_session_isolation(tmp_path):
+    """档位按会话独立：改 A 不影响 B，新会话用全局默认。"""
     cfg = UserConfig(tmp_path)
-    assert cfg.permission_level() == ""      # 未设置 → 让环境/默认生效
+    assert cfg.permission_level("s1") == ""      # 未设置 → 让环境/默认生效
+    assert cfg.default_level() == ""
 
-    cfg.save({"permission_level": "manual"})
-    assert UserConfig(tmp_path).permission_level() == "manual"
+    # s1 设 manual，s2 不受影响
+    assert cfg.set_permission("s1", "manual")
+    assert cfg.permission_level("s1") == "manual"
+    assert cfg.permission_level("s2") == ""
 
-    kwargs = agent_kwargs(tmp_path)
-    policy = kwargs["policy"]
-    assert policy.mode == "auto" and policy.allowed == set()
+    # s2 首次使用：用全局默认并固化
+    cfg.apply_default_to("s2", "full")
+    assert cfg.permission_level("s2") == "full"
+    assert cfg.permission_level("s1") == "manual"
 
-    cfg.save({"permission_level": "full"})
-    assert agent_kwargs(tmp_path)["policy"].mode == "allow_all"
+    # 改 s2 不影响 s1
+    cfg.set_permission("s2", "smart")
+    assert cfg.permission_level("s2") == "smart"
+    assert cfg.permission_level("s1") == "manual"
+
+    # 新会话默认来自 permission_default，不是某个会话的档位
+    cfg.set_permission("", "manual")   # 全局默认
+    assert cfg.default_level() == "manual"
+    assert UserConfig(tmp_path).permission_level("s3") == "manual"
+
+    # agent_kwargs 构造时读全局默认（新会话初始值）
+    assert agent_kwargs(tmp_path)["policy"].mode == "auto"
+    assert agent_kwargs(tmp_path)["policy"].allowed == set()   # manual=空名单
 
     # 损坏的 config 不致命
     (tmp_path / "config.json").write_text("not json", encoding="utf-8")
-    assert UserConfig(tmp_path).permission_level() == ""
+    assert UserConfig(tmp_path).permission_level("s1") == ""
 
 
 def test_permission_state_protocol_contract():
@@ -78,3 +93,35 @@ def test_permission_state_protocol_contract():
     assert msg["type"] == "permission.state"
     assert {"level", "description"} <= set(msg)
     assert msg["level"] in PERMISSION_LEVELS
+
+
+def test_policy_copy_prevents_shared_template_pollution():
+    """回归：SessionManager 的 policy 模板被所有会话共享，改一个不能污染其他。"""
+    import copy
+    template = AllowlistPolicy(allowed={"remember_fact"}, mode="auto")
+    shared_kwargs = {"policy": template}   # 模拟 SessionManager._agent_kwargs
+
+    # 会话 A 改档：必须先复制，不能动模板
+    a = copy.copy(shared_kwargs["policy"])
+    apply_permission_level(a, "full")
+    assert template.mode == "auto" and "remember_fact" in template.allowed
+
+    # 会话 B 从模板构造：仍是 smart，没被 A 污染
+    b = copy.copy(shared_kwargs["policy"])
+    assert permission_level_of(b) == "smart"
+
+
+def test_policy_copy_prevents_shared_template_pollution():
+    """回归：SessionManager 的 policy 模板被所有会话共享，改一个不能污染其他。"""
+    import copy
+    template = AllowlistPolicy(allowed={"remember_fact"}, mode="auto")
+    shared_kwargs = {"policy": template}   # 模拟 SessionManager._agent_kwargs
+
+    # 会话 A 改档：必须先复制，不能动模板
+    a = copy.copy(shared_kwargs["policy"])
+    apply_permission_level(a, "full")
+    assert template.mode == "auto" and "remember_fact" in template.allowed
+
+    # 会话 B 从模板构造：仍是 smart，没被 A 污染
+    b = copy.copy(shared_kwargs["policy"])
+    assert permission_level_of(b) == "smart"
