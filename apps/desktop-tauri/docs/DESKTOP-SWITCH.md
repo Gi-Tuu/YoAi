@@ -93,3 +93,17 @@ YoAi 构造 AgentCore 时传 `model_timeout`（默认 180s，`YOAI_MODEL_TIMEOUT
 0=禁用），内核零改动。回归测试覆盖默认值/禁用/覆盖/非法回退。
 
 会话 `977a2f22` 两条"无法查看目录"失败叙事已备份后清洗（能力已具备但历史污染）。
+
+## 浮窗白屏 + 只读工具可发现性（2026-11-25 15:45）
+
+**浮窗白屏根因**：`WebviewUrl::App` 只接受路径（PathBuf），不接受查询串。
+传 `index.html?float=facts` 会被当成文件名去找 → 白屏。
+修复：`WebviewUrl::App("index.html")` + `initialization_script` 注入
+`window.__FLOAT_KIND__`，main.tsx 读全局变量分流。
+
+**模型仍说"能力缺失"根因**（用户 15:37 贴的回复）：能力有（file_ro_list/file_ro_read
+已注册 28 工具），但模型只用 file_list（沙箱）试 E 盘路径、从没意识到有只读挂载工具。
+属可发现性问题。修复：file_ro_* 描述写明"访问宿主机真实磁盘必须用本工具 + path 怎么写"；
+并在 file_list/file_read/shell_run 描述追加提示引导改用 file_ro_*（YoAi 侧包装 Core spec，
+内核零改动）。回归测试 test_readonly_tools_are_discoverable。
+全量 258 passed。

@@ -184,6 +184,17 @@ class YoAiAgent:
             # 仅 file_ro_list / file_ro_read，路径必须落在白名单根内，无写类操作。
             if readonly_roots:
                 specs = specs + readonly_tool_specs(readonly_roots)
+                # 可发现性：模型看到 file_list 就想读宿主机盘符，但那受沙箱限制必失败。
+                # 在 Core 工具描述上追加提示（YoAi 侧包装，内核零改动）——
+                # 引导它遇到绝对路径/盘符时立刻改用 file_ro_*。
+                _hint = (
+                    " 【YoAi 提示】本工具受工作区沙箱限制，不能访问宿主机盘符绝对路径"
+                    "（如 <盘符>:\\...）。用户要看宿主机项目目录/文件时，改用 file_ro_list / file_ro_read"
+                    "（path 传相对挂载根的路径，或留空列顶层）。"
+                )
+                for s in specs:
+                    if s.name in ("file_list", "file_read", "shell_run"):
+                        s.description = (s.description or "") + _hint
         # list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
         # request_capability 由 Core 的 discovery 机制注册为 meta_tool 并拦截处理。
         specs.append(self._build_list_tools_spec())

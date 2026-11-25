@@ -152,8 +152,16 @@ def readonly_tool_specs(roots: list[str | Path]) -> list[Any]:
         )
 
     def file_ro_list(path: str = "") -> str:
-        """列出只读挂载目录下的一级内容（子目录名/ 与文件名）。
-        path 为空时列各白名单根的顶层。只读，不能写。"""
+        """列出宿主机只读挂载目录的内容——访问宿主机真实磁盘（如 E 盘项目目录）必须用本工具。
+
+        【何时用】用户让你看宿主机上的具体目录/文件（例如 <盘符>:\\项目目录），
+        或 file_* 工具报『路径不能含冒号/不接受绝对路径/目录不存在』时，立刻改用本工具，
+        不要再用 file_list / shell_run 重试——那两个被沙箱限制，永远够不到宿主机磁盘。
+
+        【path 怎么写】写相对挂载根的路径（如 src、docs、README.md）；
+        path 留空则列出所有挂载根的顶层内容和根路径。不要传 <盘符>:\\ 这种绝对路径。
+
+        只读，不能写。"""
         import json as _json
         if not str(path).strip():
             listing = {}
@@ -171,7 +179,14 @@ def readonly_tool_specs(roots: list[str | Path]) -> list[Any]:
         )
 
     def file_ro_read(path: str, max_chars: int = 20000) -> str:
-        """读取只读挂载目录内一个文本文件的内容（源码/文档/配置）。
+        """读取宿主机只读挂载目录内的文本文件内容（源码/文档/配置）。
+
+        【何时用】需要查看宿主机真实磁盘上的文件（如 E 盘项目里的源码），用本工具；
+        file_read / shell_run 受沙箱限制，读不到宿主机绝对路径。
+
+        【path 怎么写】相对挂载根的路径，例如 src/yoai/agent.py、docs/README.md；
+        不知道有哪些文件时先调 file_ro_list(path="") 拿到根和顶层清单。不要传 <盘符>:\\ 绝对路径。
+
         max_chars 限制返回长度（上限 50000）；二进制文件会如实报错。只读，不能写。"""
         max_chars = max(500, min(50000, int(max_chars)))
         p = _resolve_in_roots(path)

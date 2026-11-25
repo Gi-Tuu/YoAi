@@ -138,10 +138,12 @@ fn open_float_panel(app: tauri::AppHandle, kind: String, title: String) -> Resul
         let _ = w.show();
         return Ok(());   // 已存在则只显示，不重复建窗
     }
-    let url = format!("index.html?float={}", kind);
-    let webview_url = WebviewUrl::App(url.parse().map_err(|e| format!("bad url: {:?}", e))?);
-    WebviewWindowBuilder::new(&app, &label, webview_url)
+    // WebviewUrl::App 只接受路径（不接受查询串），否则会找名为 "index.html?float=x" 的文件→白屏。
+    // 用初始化脚本注入浮窗标识，main.tsx 读 window.__FLOAT_KIND__ 分流。
+    let init = format!("window.__FLOAT_KIND__ = {:?};", kind);
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
         .title(&title)
+        .initialization_script(&init)
         .inner_size(320.0, 260.0)
         .min_inner_size(220.0, 160.0)
         .decorations(false)      // 自绘标题栏（纸墨风格）
@@ -165,10 +167,10 @@ fn hover_float_panel(
     let win = if let Some(w) = app.get_webview_window(&label) {
         w
     } else {
-        let url = format!("index.html?float={}", kind);
-        let webview_url = WebviewUrl::App(url.parse().map_err(|e| format!("bad url: {:?}", e))?);
-        WebviewWindowBuilder::new(&app, &label, webview_url)
+        let init = format!("window.__FLOAT_KIND__ = {:?};", kind);
+        WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
             .title(&title)
+            .initialization_script(&init)
             .inner_size(320.0, 260.0)
             .min_inner_size(220.0, 160.0)
             .decorations(false)

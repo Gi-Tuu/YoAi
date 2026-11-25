@@ -165,3 +165,37 @@ def test_model_timeout_reasonable_for_reasoning_model(monkeypatch, tmp_path):
 
     monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "not-a-number")
     assert YoAiAgent(data_dir=tmp_path / "d").core.model_timeout == 180.0
+
+
+def test_readonly_tools_are_discoverable(monkeypatch, tmp_path):
+    """挂载只读根时，file_list/shell_run 描述必须引导模型改用 file_ro_*，
+    否则模型会反复用沙箱工具试 E 盘路径并误判"能力缺失"（2026-11-25 实测）。"""
+    from yoai.agent import YoAiAgent
+    from yoai.bootstrap import agent_kwargs
+
+    monkeypatch.setenv("YOAI_READONLY_ROOTS", str(tmp_path))
+    kw = agent_kwargs(tmp_path / "data")
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+    a = YoAiAgent(**kw)
+    specs = {s.name: s for s in a._all_tool_specs}
+    assert "file_ro_list" in specs and "file_ro_read" in specs
+    for name in ("file_list", "shell_run"):
+        assert "file_ro_list" in specs[name].description, f"{name} 缺少只读工具引导"
+    assert "宿主机" in specs["file_ro_list"].description
+
+
+def test_readonly_tools_are_discoverable(monkeypatch, tmp_path):
+    """挂载只读根时，file_list/shell_run 描述必须引导模型改用 file_ro_*，
+    否则模型会反复用沙箱工具试 E 盘路径并误判"能力缺失"（2026-11-25 实测）。"""
+    from yoai.agent import YoAiAgent
+    from yoai.bootstrap import agent_kwargs
+
+    monkeypatch.setenv("YOAI_READONLY_ROOTS", str(tmp_path))
+    kw = agent_kwargs(tmp_path / "data")
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+    a = YoAiAgent(**kw)
+    specs = {s.name: s for s in a._all_tool_specs}
+    assert "file_ro_list" in specs and "file_ro_read" in specs
+    for name in ("file_list", "shell_run"):
+        assert "file_ro_list" in specs[name].description, f"{name} 缺少只读工具引导"
+    assert "宿主机" in specs["file_ro_list"].description
