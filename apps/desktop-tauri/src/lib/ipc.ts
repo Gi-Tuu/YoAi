@@ -140,11 +140,6 @@ export class IpcClient {
     await this.send({ v: PROTOCOL_VERSION, type: "permission.set", level });
   }
 
-  /** 把最新 snapshot 推给已钉住的浮窗（Rust 侧对不存在的浮窗静默跳过）。 */
-  async pushFloatData(payload: string): Promise<void> {
-    await invoke("push_float_data", { payload });
-  }
-
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });
     this.disconnect();

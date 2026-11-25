@@ -13,7 +13,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, State};
 
 pub struct RuntimeState {
     child: Mutex<Option<Child>>,
@@ -129,96 +129,6 @@ fn runtime_status(state: State<'_, RuntimeState>) -> bool {
     state.child.lock().map(|g| g.as_ref().is_some_and(|c| c.id() > 0)).unwrap_or(false)
 }
 
-/// 打开/聚焦一个信息浮窗（钉住能力）。无边框、置顶、可拖动、可缩放，能浮到桌面任意位置。
-/// 浮窗加载同一前端，带 ?float=<kind> 查询参数；数据由主窗口 emit 过来，浮窗不连 runtime。
-#[tauri::command]
-fn open_float_panel(app: tauri::AppHandle, kind: String, title: String) -> Result<(), String> {
-    let label = format!("float-{}", kind);
-    if let Some(w) = app.get_webview_window(&label) {
-        let _ = w.show();
-        return Ok(());   // 已存在则只显示，不重复建窗
-    }
-    // WebviewUrl::App 只接受路径（不接受查询串），否则会找名为 "index.html?float=x" 的文件→白屏。
-    // 用初始化脚本注入浮窗标识，main.tsx 读 window.__FLOAT_KIND__ 分流。
-    let init = format!("window.__FLOAT_KIND__ = {:?};", kind);
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
-        .title(&title)
-        .initialization_script(&init)
-        .inner_size(320.0, 260.0)
-        .min_inner_size(220.0, 160.0)
-        .decorations(false)      // 自绘标题栏（纸墨风格）
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(true)
-        .build()
-        .map_err(|e| format!("创建浮窗失败：{}", e))?;
-    Ok(())
-}
-
-/// 悬停即出窗：创建/显示浮窗并按锚点的屏幕坐标定位（贴近方块，避开对话区方向由前端算好传入）。
-/// 浮窗不抢焦点（set_focus 不调用），避免打断主窗口输入。
-#[tauri::command]
-fn hover_float_panel(
-    app: tauri::AppHandle, kind: String, title: String,
-    x: f64, y: f64, _width: f64, height: f64,
-) -> Result<(), String> {
-    let label = format!("float-{}", kind);
-    let win = if let Some(w) = app.get_webview_window(&label) {
-        w
-    } else {
-        let init = format!("window.__FLOAT_KIND__ = {:?};", kind);
-        WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
-            .title(&title)
-            .initialization_script(&init)
-            .inner_size(320.0, 260.0)
-            .min_inner_size(220.0, 160.0)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(true)
-            .focused(false)          // 悬停浮窗不抢主窗口焦点
-            .build()
-            .map_err(|e| format!("创建浮窗失败：{}", e))?
-    };
-    // 定位：默认放在锚点左侧（右侧锚点），钳制到主屏可见区
-    let px = x - 320.0 - 8.0;
-    let py = y + height / 2.0 - 130.0;
-    let _ = win.set_position(tauri::LogicalPosition::new(px.max(4.0), py.max(4.0)));
-    let _ = win.show();
-    Ok(())
-}
-
-/// 浮窗鼠标进入/离开由前端 emit 通知主窗口协调延迟关闭；这里转发事件给主窗。
-#[tauri::command]
-fn float_hover_signal(app: tauri::AppHandle, kind: String, entering: bool) -> Result<(), String> {
-    let _ = app.emit("float://hover-signal", serde_json::json!({
-        "kind": kind, "entering": entering,
-    }));
-    Ok(())
-}
-
-#[tauri::command]
-fn close_float_panel(app: tauri::AppHandle, label: String) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window(&label) {
-        let _ = w.close();
-    }
-    Ok(())
-}
-
-/// 主窗口把最新 snapshot 推送给已存在的浮窗；浮窗不存在时静默跳过（没钉住）。
-#[tauri::command]
-fn push_float_data(app: tauri::AppHandle, payload: String) -> Result<(), String> {
-    for kind in ["facts", "goals", "memory"] {
-        let label = format!("float-{}", kind);
-        if app.get_webview_window(&label).is_some() {
-            let _ = app.emit_to(&label, "float://data", &payload);
-        }
-    }
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -263,8 +173,6 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 关键：只有主窗口关闭才 shutdown runtime。浮窗关闭不能杀掉 Python 子进程。
-            if window.label() != "main" { return; }
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.try_state::<RuntimeState>() {
                     // 优雅退出：shutdown 后等待子进程，避免残留
@@ -279,10 +187,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![
-            ipc_send, runtime_status, open_float_panel, close_float_panel, push_float_data,
-            hover_float_panel, float_hover_signal
-        ])
+        .invoke_handler(tauri::generate_handler![ipc_send, runtime_status])
         .run(tauri::generate_context!())
         .expect("YoAi Tauri 启动失败");
 }
