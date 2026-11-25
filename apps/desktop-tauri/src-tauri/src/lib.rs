@@ -154,6 +154,49 @@ fn open_float_panel(app: tauri::AppHandle, kind: String, title: String) -> Resul
     Ok(())
 }
 
+/// 悬停即出窗：创建/显示浮窗并按锚点的屏幕坐标定位（贴近方块，避开对话区方向由前端算好传入）。
+/// 浮窗不抢焦点（set_focus 不调用），避免打断主窗口输入。
+#[tauri::command]
+fn hover_float_panel(
+    app: tauri::AppHandle, kind: String, title: String,
+    x: f64, y: f64, _width: f64, height: f64,
+) -> Result<(), String> {
+    let label = format!("float-{}", kind);
+    let win = if let Some(w) = app.get_webview_window(&label) {
+        w
+    } else {
+        let url = format!("index.html?float={}", kind);
+        let webview_url = WebviewUrl::App(url.parse().map_err(|e| format!("bad url: {:?}", e))?);
+        WebviewWindowBuilder::new(&app, &label, webview_url)
+            .title(&title)
+            .inner_size(320.0, 260.0)
+            .min_inner_size(220.0, 160.0)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(true)
+            .focused(false)          // 悬停浮窗不抢主窗口焦点
+            .build()
+            .map_err(|e| format!("创建浮窗失败：{}", e))?
+    };
+    // 定位：默认放在锚点左侧（右侧锚点），钳制到主屏可见区
+    let px = x - 320.0 - 8.0;
+    let py = y + height / 2.0 - 130.0;
+    let _ = win.set_position(tauri::LogicalPosition::new(px.max(4.0), py.max(4.0)));
+    let _ = win.show();
+    Ok(())
+}
+
+/// 浮窗鼠标进入/离开由前端 emit 通知主窗口协调延迟关闭；这里转发事件给主窗。
+#[tauri::command]
+fn float_hover_signal(app: tauri::AppHandle, kind: String, entering: bool) -> Result<(), String> {
+    let _ = app.emit("float://hover-signal", serde_json::json!({
+        "kind": kind, "entering": entering,
+    }));
+    Ok(())
+}
+
 #[tauri::command]
 fn close_float_panel(app: tauri::AppHandle, label: String) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(&label) {
@@ -235,7 +278,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            ipc_send, runtime_status, open_float_panel, close_float_panel, push_float_data
+            ipc_send, runtime_status, open_float_panel, close_float_panel, push_float_data,
+            hover_float_panel, float_hover_signal
         ])
         .run(tauri::generate_context!())
         .expect("YoAi Tauri 启动失败");

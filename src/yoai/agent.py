@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,6 +73,7 @@ class YoAiAgent:
         readonly_roots: list[str | Path] | None = None,
         channel: Any = None,
         policy: Any = None,
+        model_timeout: float | None = "env",  # type: ignore[assignment]
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
         过滤可用工具（专家白名单接线）。None 或返回 None 表示不限制。默认不启用，
@@ -119,9 +121,22 @@ class YoAiAgent:
         # discovery：Core 只有配了发现源才把 request_capability 注册为 meta_tool
         # （由 loop 拦截）；YoAi 不再手动注册，根治"应由 Agent Loop 直接处理"报错。
         from yai_core.discovery import StaticCatalog
+        # 单次模型调用硬超时：Core 默认 60s，对 spark-x2.6 这类推理模型太紧
+        # （带 26+ 工具 schema 时首 token 实测可达 40s，升档纠偏轮再叠加就破 60s）。
+        # 默认改为 180s；YOAI_MODEL_TIMEOUT=0 可关闭（交给模型客户端自身超时），
+        # 也支持显式数字覆盖。内核零改动——Core 公开构造参数。
+        if model_timeout == "env":
+            raw = os.environ.get("YOAI_MODEL_TIMEOUT", "180").strip()
+            try:
+                resolved: float | None = None if raw == "0" else float(raw)
+            except ValueError:
+                resolved = 180.0     # 环境变量填错不致命，回退安全默认
+        else:
+            resolved = model_timeout
         core_kwargs: dict[str, Any] = {
             "outcome_verifier": verifier,
             "discovery": StaticCatalog([]),   # 空目录：允许声明缺口，不动态加工具
+            "model_timeout": resolved,
         }
         # 实操工具（文件/联网）：Core 公开 API 注册，内核零改动、升级兼容。
         if memory is not None:

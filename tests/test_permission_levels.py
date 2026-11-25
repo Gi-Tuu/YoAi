@@ -125,3 +125,43 @@ def test_policy_copy_prevents_shared_template_pollution():
     # 会话 B 从模板构造：仍是 smart，没被 A 污染
     b = copy.copy(shared_kwargs["policy"])
     assert permission_level_of(b) == "smart"
+
+
+def test_model_timeout_reasonable_for_reasoning_model(monkeypatch, tmp_path):
+    """推理模型（spark-x2.6）带工具 schema 首 token 可达 40s+，Core 默认 60s 会误杀。
+    YoAi 默认 180s；环境变量可覆盖/关闭；非法值回退。"""
+    from yoai.agent import YoAiAgent
+
+    monkeypatch.delenv("YOAI_MODEL_TIMEOUT", raising=False)
+    a = YoAiAgent(data_dir=tmp_path / "a")
+    assert a.core.model_timeout == 180.0
+    assert a.core._loop.model_timeout == 180.0   # 真正生效在 loop
+
+    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "0")
+    assert YoAiAgent(data_dir=tmp_path / "b").core.model_timeout is None
+
+    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "240")
+    assert YoAiAgent(data_dir=tmp_path / "c").core.model_timeout == 240.0
+
+    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "not-a-number")
+    assert YoAiAgent(data_dir=tmp_path / "d").core.model_timeout == 180.0
+
+
+def test_model_timeout_reasonable_for_reasoning_model(monkeypatch, tmp_path):
+    """推理模型（spark-x2.6）带工具 schema 首 token 可达 40s+，Core 默认 60s 会误杀。
+    YoAi 默认 180s；环境变量可覆盖/关闭；非法值回退。"""
+    from yoai.agent import YoAiAgent
+
+    monkeypatch.delenv("YOAI_MODEL_TIMEOUT", raising=False)
+    a = YoAiAgent(data_dir=tmp_path / "a")
+    assert a.core.model_timeout == 180.0
+    assert a.core._loop.model_timeout == 180.0   # 真正生效在 loop
+
+    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "0")
+    assert YoAiAgent(data_dir=tmp_path / "b").core.model_timeout is None
+
+    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "240")
+    assert YoAiAgent(data_dir=tmp_path / "c").core.model_timeout == 240.0
+
+    monkeypatch.setenv("YOAI_MODEL_TIMEOUT", "not-a-number")
+    assert YoAiAgent(data_dir=tmp_path / "d").core.model_timeout == 180.0

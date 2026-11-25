@@ -76,3 +76,20 @@ Python 子进程杀掉。
 
 测试：前端 16 passed（新增 anchor-rail.test.tsx 6 项：几何自适应/hover/钉住）、
 全量 Python 256 passed；Rust 编译通过。
+
+## 悬停直接出原生窗 + 推理模型超时修复（2026-11-25 15:25）
+
+**按所有者要求改为悬停直接出原生窗**（替代上一版"悬停 DOM + 点击钉住"）：
+- 悬停方块 → Rust `hover_float_panel` 创建/定位无边框置顶浮窗到锚点旁，能浮出桌面
+- 跨窗口 hover 协调：主窗/浮窗都 emit `float://hover-signal`，浮窗侧维护
+  anchor/panel 进入状态，都离开 250ms 后自动收起；点击内容区钉住不再收起
+- **风险（待真机验收）**：浮窗置顶会遮挡主窗，鼠标移向浮窗路径可能误触发 leave；
+  250ms 延迟缓解但未在 GUI 实测
+- 浮窗 listener 用静态 import（动态 import 绕过 mock，且生产可能丢 float://data）
+
+**60s 超时修复**（用户截图 TimeoutError）：Core `AgentLoop` 默认 `model_timeout=60s`，
+spark-x2.6 带 26 工具 schema 首 token 可达 40s+，升档纠偏轮叠加就破 60s。
+YoAi 构造 AgentCore 时传 `model_timeout`（默认 180s，`YOAI_MODEL_TIMEOUT` 可覆盖，
+0=禁用），内核零改动。回归测试覆盖默认值/禁用/覆盖/非法回退。
+
+会话 `977a2f22` 两条"无法查看目录"失败叙事已备份后清洗（能力已具备但历史污染）。
