@@ -130,3 +130,25 @@ describe("审批弹窗交互（hook 级）", () => {
     expect(result.current.runs.get("r1")?.approval).toBeNull();
   });
 });
+
+describe("项目模式 UI", () => {
+  it("项目列表与创建入口渲染；项目会话显示当前项目", async () => {
+    const { ProjectPanel } = await import("../src/components/ProjectPanel");
+    const projects = [{ id: "p1", name: "我的项目", path: "C:/proj", created_at: "" }];
+    const sessions = [{ id: "s1", name: "会话1", mode: "project" as const, project_id: "p1" }];
+    render(<ProjectPanel projects={projects} sessions={sessions}
+           currentSessionId="s1" ready={true} busy={false} onError={() => {}} />);
+    expect(screen.getByText("我的项目")).toBeTruthy();
+    expect(screen.getByText(/当前：我的项目/)).toBeTruthy();
+    expect(screen.getByText("＋ 创建项目")).toBeTruthy();
+  });
+
+  it("聊天模式会话不显示当前项目条", async () => {
+    const { ProjectPanel } = await import("../src/components/ProjectPanel");
+    const sessions = [{ id: "s1", name: "会话1", mode: "chat" as const }];
+    render(<ProjectPanel projects={[]} sessions={sessions}
+           currentSessionId="s1" ready={true} busy={false} onError={() => {}} />);
+    expect(screen.queryByText(/当前：/)).toBeNull();
+    expect(screen.getByText(/暂无项目/)).toBeTruthy();
+  });
+});

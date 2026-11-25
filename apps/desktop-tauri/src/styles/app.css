@@ -400,3 +400,32 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 .perm-control select[data-level="full"] { border-left: 3px solid var(--vermilion); }
 .perm-control select[data-level="smart"] { border-left: 3px solid var(--ok); }
 .perm-control select[data-level="manual"] { border-left: 3px solid var(--warn); }
+
+/* ===== 项目面板（会话抽屉内：聊天模式 / 项目模式）===== */
+.project-panel {
+  border-top: 1px solid var(--rule); margin-top: var(--sp-2);
+  padding: var(--sp-2) 0 0;
+}
+.project-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0 var(--sp-2) var(--sp-1);
+  font-size: var(--fs-note);
+}
+.project-head button { font-size: var(--fs-cap); }
+.project-current {
+  margin: 0 var(--sp-2) var(--sp-1); padding: 3px 6px;
+  border-left: 3px solid var(--brick); background: var(--surface);
+  color: var(--ink); font-size: var(--fs-cap);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.project-list { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; }
+.project-list li { display: flex; align-items: center; gap: 2px; }
+.project-pick {
+  flex: 1; text-align: left; background: transparent; border: none;
+  color: var(--ink); font-size: var(--fs-note); padding: 4px var(--sp-2);
+  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.project-pick:hover { color: var(--brick); }
+.project-hint { color: var(--weak); font-size: var(--fs-cap); margin-left: 4px; }
+.project-icon { padding: 2px 6px; font-size: var(--fs-note); }
+.project-empty { color: var(--weak); font-size: var(--fs-cap); padding: 4px var(--sp-2); }

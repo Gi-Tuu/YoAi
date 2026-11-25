@@ -29,6 +29,15 @@ export interface SessionInfo {
   name: string;
   created_at?: string;
   last_active?: string;
+  mode?: "chat" | "project";   // 聊天模式(沙箱) | 项目模式(可写项目文件夹)
+  project_id?: string;
+}
+
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  path: string;
+  created_at: string;
 }
 
 export interface HistoryEntry {
@@ -57,11 +66,15 @@ export interface SnapshotMsg extends BaseMsg {
   current_id: string;
   history: HistoryEntry[];
   model: string;
+  model_id?: string;
+  model_options?: { id: string; label: string }[];
+  context_usage?: { used: number; limit: number };
   facts: Record<string, string>;
   goals: GoalInfo[];
   write_stats: Record<string, number>;
   tools: string[];
   thinking_log: ThinkingRecord[];   // 历史 thinking（YoAi 侧持久化）
+  projects?: ProjectInfo[];          // 项目列表
 }
 
 export interface ChatEntry {
@@ -195,6 +208,7 @@ export type Command =
   | { v: 1; type: "task.cancel"; task_id: string; run_id: string }
   | { v: 1; type: "session.state" }
   | { v: 1; type: "session.create"; name: string }
+  | { v: 1; type: "model.select"; model_id: string }
   | { v: 1; type: "session.switch"; session_id: string }
   | { v: 1; type: "session.rename"; session_id: string; name: string }
   | { v: 1; type: "session.delete"; session_id: string }
@@ -207,6 +221,10 @@ export type Command =
   | { v: 1; type: "archive.get" }
   | { v: 1; type: "permission.get" }
   | { v: 1; type: "permission.set"; level: PermissionLevel }
+  | { v: 1; type: "project.create"; name: string; path: string; session_name?: string }
+  | { v: 1; type: "project.list" }
+  | { v: 1; type: "project.delete"; project_id: string }
+  | { v: 1; type: "session.new_in_project"; project_id: string; name?: string }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

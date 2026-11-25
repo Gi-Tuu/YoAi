@@ -17,6 +17,7 @@
     "core:window:allow-set-position",
     "core:window:allow-set-resizable",
     "core:window:allow-set-size",
-    "opener:default"
+    "opener:default",
+    "dialog:allow-open"
   ]
 }

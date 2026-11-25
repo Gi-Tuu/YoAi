@@ -140,6 +140,20 @@ export class IpcClient {
     await this.send({ v: PROTOCOL_VERSION, type: "permission.set", level });
   }
 
+  // ---- 项目模式 ----
+  async createProject(name: string, path: string, sessionName?: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "project.create", name, path, session_name: sessionName });
+  }
+  async listProjects(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "project.list" });
+  }
+  async deleteProject(projectId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "project.delete", project_id: projectId });
+  }
+  async newSessionInProject(projectId: string, name?: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "session.new_in_project", project_id: projectId, name });
+  }
+
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });
     this.disconnect();

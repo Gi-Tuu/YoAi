@@ -10,16 +10,16 @@ import { useTaskStream, type RunState } from "./hooks/useTaskStream";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { Markdown } from "./components/Markdown";
 import { SideCards } from "./components/SideCards";
+import { ProjectPanel } from "./components/ProjectPanel";
+import { shrinkWindow, restoreWindow } from "./lib/capsuleWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WindowControls } from "./components/WindowControls";
 import { CommsPage } from "./components/CommsPage";
 import { GalaxyPage } from "./components/GalaxyPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
 import type { RuntimeMsg, SnapshotMsg, ThinkingRecord, PermissionLevel } from "./types/ipc";
 
 const newId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-
-const PAGE_TITLES: Record<string, string> = {
-  chat: "我的对话", comms: "通讯", galaxy: "星球系",
-};
 
 /** 旧端 _clean_final_text 已在 runtime 完成；这里只兜底空文本。 */
 /** 历史消息：带可展开的 thinking（从 YoAi 侧持久化记录按提问文本对齐）。 */
@@ -107,12 +107,14 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [floating, setFloating] = useState(false);
+  const savedWindow = useRef<Awaited<ReturnType<typeof shrinkWindow>> | null>(null);
+  const changingWindow = useRef(false);
   const [page, setPage] = useState<"chat" | "comms" | "galaxy">("chat");
   const [snap, setSnap] = useState<SnapshotMsg | null>(null);
   const [permission, setPermission] = useState<{
     level: PermissionLevel; description: string;
   }>({ level: "smart", description: "" });
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [dialog, setDialog] = useState<
     | { kind: "rename"; sessionId: string; initial: string }
     | { kind: "delete"; sessionId: string; name: string }
@@ -143,7 +145,7 @@ export default function App() {
     const off = ipc.onMessage((m) => {
       setMsgs((prev) => [...prev, m]);   // 所有 runtime 消息进入消费队列
       if (m.type === "ready") setReady(true);
-      if (m.type === "error" && m.stage === "startup") setErr(m.message);
+      if (m.type === "error" && (m.stage === "startup" || (m.stage === "protocol" && !m.run_id))) setErr(m.message);
       if (m.type === "permission.state") {
         setPermission({ level: m.level, description: m.description });
       }
@@ -194,9 +196,13 @@ export default function App() {
 
   const active = runs.get(activeRunId);
   const busy = active?.state === "running";
+  const usage = snap?.context_usage;
+  const used = usage ? Math.min(usage.limit, usage.used + Array.from(input).length) : 0;
+  const percent = usage ? Math.round(100 * used / usage.limit) : 0;
+  const contextLabel = usage ? `历史与草稿约 ${used.toLocaleString()} / ${usage.limit.toLocaleString()} 字符（${percent}%）` : "正在读取上下文";
+  const modelOptions = snap?.model_options ?? [];
   const runList = useMemo(() => [...runs.values()], [runs]);
   const sessions = snap?.sessions ?? [];
-  const currentSession = sessions.find((s) => s.id === snap?.current_id);
 
   const sessionLabel = useCallback((s: { name: string; created_at?: string }) => {
     if (!s.created_at) return s.name;
@@ -205,11 +211,46 @@ export default function App() {
     return `${s.name} · ${String(d.getMonth() + 1).padStart(2, "0")}月${String(d.getDate()).padStart(2, "0")}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }, []);
 
+  const setCapsuleMode = useCallback(async (enabled: boolean) => {
+    if (changingWindow.current) return;
+    changingWindow.current = true;
+    try {
+      setErr("");
+      if (enabled) {
+        savedWindow.current = await shrinkWindow();
+      } else if (savedWindow.current) {
+        await restoreWindow(savedWindow.current);
+        savedWindow.current = null;
+      }
+      setFloating(enabled);
+    } catch (error) {
+      setErr(`窗口切换失败：${String(error)}`);
+    } finally {
+      changingWindow.current = false;
+    }
+  }, []);
+
+  const awaitingApproval = runList.some((run) => run.approval);
+  useEffect(() => {
+    if (floating && awaitingApproval) void setCapsuleMode(false);
+  }, [awaitingApproval, floating, setCapsuleMode]);
+
   if (floating) {
+    const labels = { running: "执行中", done: "已完成", failed: "执行失败", cancelled: "已取消" };
+    const state = active?.state ?? "idle";
+    const label = state in labels ? labels[state as keyof typeof labels] : "待命";
     return (
-      <div className="capsule" onClick={() => setFloating(false)} title="点击展开主面板">
-        <span className="capsule-dot" data-state={active?.state ?? "idle"} />
-        <span>{active ? `${active.state} · ${active.events.length} 步` : "YoAi 待命"}</span>
+      <div className="capsule" title={err || undefined}>
+        <div className="capsule-handle" title="拖动悬浮窗口" aria-hidden="true"
+             onMouseDown={(event) => {
+               if (event.button === 0) void getCurrentWindow().startDragging().catch((error) => setErr(String(error)));
+             }}>⠿</div>
+        <button className="capsule-expand" onClick={() => void setCapsuleMode(false)}
+                title="恢复主窗口" aria-label="恢复主窗口">
+          <span className="capsule-dot" data-state={state} />
+          <span>{err ? "恢复失败，点击重试" : `YoAi · ${label}`}</span>
+          {active && !err && <span className="capsule-steps">{active.events.length} 步</span>}
+        </button>
       </div>
     );
   }
@@ -217,66 +258,74 @@ export default function App() {
   return (
     <div className="app-shell">
       <nav className="nav-rail">
-        <button className={`nav-item ${page === "chat" ? "active" : ""}`} title="我的对话"
-                onClick={() => setPage("chat")}>对话</button>
-        <button className={`nav-item ${page === "comms" ? "active" : ""}`} title="通讯"
+        <div className="session-nav"
+             onPointerEnter={(event) => { if (event.pointerType !== "touch") setSessionsOpen(true); }}
+             onPointerLeave={(event) => { if (event.pointerType !== "touch") setSessionsOpen(false); }}
+             onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSessionsOpen(false); }}
+             onKeyDown={(event) => {
+               if (event.key === "Escape" && sessionsOpen) {
+                 event.currentTarget.querySelector("button")?.focus();
+                 setSessionsOpen(false);
+               }
+             }}>
+          <button className={`nav-item ${page === "chat" ? "active" : ""}`} title="我的对话" aria-current={page === "chat" ? "page" : undefined}
+                  aria-expanded={sessionsOpen} aria-controls="session-list-panel"
+                  onClick={() => { setPage("chat"); setSessionsOpen(true); }}>对话</button>
+          {sessionsOpen && (
+            <section id="session-list-panel" className="session-flyout" aria-label="会话">
+              <header>
+                <strong>会话</strong>
+                <button disabled={!ready || busy} onClick={() => {
+                  void ipc.createSession("新会话").catch((error) => setErr(String(error)));
+                  setPage("chat"); setSessionsOpen(false);
+                }}>＋ 新建</button>
+              </header>
+              <ul className="session-list">
+                {sessions.length === 0 && <li className="session-empty">暂无会话</li>}
+                {sessions.map((session) => (
+                  <li key={session.id}>
+                    <button className="session-pick" title={sessionLabel(session)}
+                            aria-current={session.id === snap?.current_id ? "true" : undefined}
+                            disabled={busy} onClick={() => {
+                              void ipc.switchSession(session.id).catch((error) => setErr(String(error)));
+                              setPage("chat"); setSessionsOpen(false);
+                            }}>{sessionLabel(session)}</button>
+                    <button className="session-icon ghost" title="重命名"
+                            aria-label={`重命名 ${session.name}`} disabled={busy} onClick={() => {
+                              setSessionsOpen(false);
+                              setDialog({ kind: "rename", sessionId: session.id, initial: session.name });
+                            }}>✎</button>
+                    <button className="session-icon ghost" title="删除"
+                            aria-label={`删除 ${session.name}`} disabled={busy} onClick={() => {
+                              setSessionsOpen(false);
+                              setDialog({ kind: "delete", sessionId: session.id, name: session.name });
+                            }}>🗑︎</button>
+                  </li>
+                ))}
+              </ul>
+              <ProjectPanel
+                projects={snap?.projects ?? []}
+                sessions={sessions}
+                currentSessionId={snap?.current_id ?? ""}
+                ready={ready} busy={busy}
+                onError={(message) => setErr(message)} />
+            </section>
+          )}
+        </div>
+        <button className={`nav-item ${page === "comms" ? "active" : ""}`} title="通讯" aria-current={page === "comms" ? "page" : undefined}
                 onClick={() => setPage("comms")}>通讯</button>
-        <button className={`nav-item ${page === "galaxy" ? "active" : ""}`} title="星球系"
+        <button className={`nav-item ${page === "galaxy" ? "active" : ""}`} title="星球系" aria-current={page === "galaxy" ? "page" : undefined}
                 onClick={() => setPage("galaxy")}>星球</button>
         <div className="nav-spacer" />
         <button className="nav-item ghost" title="切换纸墨主题" onClick={toggleTheme}>
           {theme === "light" ? "墨" : "纸"}
         </button>
-        <button className="nav-item ghost" title="切换悬浮模式" onClick={() => setFloating(true)}>◱</button>
+        <button className="nav-item ghost" title="切换悬浮模式" disabled={awaitingApproval} onClick={() => void setCapsuleMode(true)}>◱</button>
       </nav>
 
       <div className="main-col">
-        <header className="topbar">
-          <div className="page-title">{PAGE_TITLES[page]}</div>
-          {page === "chat" && (
-            <div className="session-bar">
-              <select value={snap?.current_id ?? ""}
-                      disabled={busy || sessions.length === 0}
-                      title="切换会话"
-                      onChange={(e) => { if (e.target.value) void ipc.switchSession(e.target.value); }}>
-                {sessions.length === 0 && <option value="">（无会话）</option>}
-                {sessions.map((s) => (
-                  <option key={s.id} value={s.id}>{sessionLabel(s)}</option>
-                ))}
-              </select>
-              <button className="ghost" disabled={busy} onClick={() => { void ipc.createSession("新会话"); }}>＋ 新建</button>
-              <div className="menu-wrap">
-                <button className="ghost" disabled={busy || !currentSession}
-                        onClick={() => setMenuOpen((v) => !v)}>管理</button>
-                {menuOpen && currentSession && (
-                  <div className="menu-pop" onMouseLeave={() => setMenuOpen(false)}>
-                    <button onClick={() => { setMenuOpen(false); setDialog({ kind: "rename", sessionId: currentSession.id, initial: currentSession.name }); }}>重命名会话</button>
-                    <button onClick={() => { setMenuOpen(false); setDialog({ kind: "delete", sessionId: currentSession.id, name: currentSession.name }); }}>删除会话…</button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="top-right">
-            <span className="model-chip" title="当前模型">模型 · {snap?.model ?? "…"}</span>
-            <label className="perm-control" title={permission.description}>
-              <span>权限</span>
-              <select value={permission.level}
-                      data-level={permission.level}
-                      onChange={(e) => {
-                        const level = e.target.value as PermissionLevel;
-                        void ipc.setPermission(level).catch((err) => setErr(String(err)));
-                      }}>
-                <option value="full">允许完全访问</option>
-                <option value="smart">智能访问</option>
-                <option value="manual">手批访问</option>
-              </select>
-            </label>
-            <span className="state" data-state={active?.state ?? "idle"}>
-              {busy ? "执行中" : active?.state === "done" ? "已完成" : active?.state === "failed" ? "失败" : "就绪"}
-            </span>
-          </div>
-        </header>
+        <div className="window-drag-strip" data-tauri-drag-region aria-hidden="true" />
+        <WindowControls onError={setErr} />
 
         {err && <div className="error-bar">⚠ {err}</div>}
         {!ready && <div className="boot-bar">正在连接 Python Runtime…</div>}
@@ -311,13 +360,40 @@ export default function App() {
               </div>
 
               <div className="composer">
-                <textarea value={input} onChange={(e) => setInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                          placeholder="输入任务…（Enter 发送，Shift+Enter 换行）" rows={2} />
-                <div className="composer-actions">
-                  <span className="status-pill" data-state={active?.state ?? "idle"}>
-                    {active?.state ?? "待命"} · {snap?.model ?? "…"}
-                  </span>
+                <div className="composer-toolbar">
+                  <label className="perm-control" title={permission.description}>
+                    <span>权限</span>
+                    <select value={permission.level}
+                            data-level={permission.level}
+                            onChange={(e) => {
+                              const level = e.target.value as PermissionLevel;
+                              void ipc.setPermission(level).catch((err) => setErr(String(err)));
+                            }}>
+                      <option value="full">允许完全访问</option>
+                      <option value="smart">智能访问</option>
+                      <option value="manual">手批访问</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="composer-field">
+                  <div className="context-model" title={`${contextLabel} · ${snap?.model ?? "模型"}`}>
+                    <div className="context-track" role="meter" aria-valuemin={0} aria-valuemax={100}
+                         aria-valuenow={percent} aria-label={contextLabel}>
+                      <span style={{ height: percent + "%" }} />
+                    </div>
+                    <select aria-label="切换模型" value={snap?.model_id ?? ""}
+                            disabled={!ready || busy || modelOptions.length === 0}
+                            onChange={(e) => {
+                              setErr("");
+                              void ipc.send({ v: 1, type: "model.select", model_id: e.target.value })
+                                .catch((error) => setErr(String(error)));
+                            }}>
+                      {modelOptions.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                    </select>
+                  </div>
+                  <textarea value={input} onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
+                            aria-label="输入任务" placeholder="输入任务…（Enter 发送，Shift+Enter 换行）" rows={2} />
                   {busy
                     ? <button className="stop" onClick={cancel}>■ 停止</button>
                     : <button className="send" onClick={send} disabled={!ready || !input.trim()}>发送 →</button>}

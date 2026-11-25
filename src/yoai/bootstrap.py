@@ -46,6 +46,7 @@ _SMART_ALLOWED = {
     "remember_event", "remember_fact", "create_goal", "complete_goal",
     "now", "recent_events", "list_tools",
     "file_ro_list", "file_ro_read",
+    "proj_list", "proj_read",
 }
 
 
@@ -102,6 +103,8 @@ def agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) -> 
         "remember_event", "remember_fact", "create_goal", "complete_goal",
         "now", "recent_events", "list_tools",
         "file_ro_list", "file_ro_read",
+        # 项目读工具自动放行；proj_write/proj_patch 是写操作，不进白名单 → 弹窗确认
+        "proj_list", "proj_read",
         # forget_fact / forget_event 是删除操作、shell_run 可执行命令：
         # 不进白名单，auto 档每次弹窗确认（默认拒绝）
     }
@@ -111,7 +114,21 @@ def agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) -> 
     return kwargs
 
 
-def build_main_model(data_dir=None):
+def available_main_models() -> dict[str, str]:
+    from yoai.models import SuanliAdapter
+    from yoai.models.core_anthropic_provider import core_anthropic_available
+
+    choices = {}
+    adapter = SuanliAdapter()
+    if adapter.available():
+        choices["openai"] = resolve_model_name(adapter)
+    if core_anthropic_available():
+        choices["anthropic"] = os.environ["ANTHROPIC_MODEL"].strip()
+    choices["demo"] = "离线 Demo"
+    return choices
+
+
+def build_main_model(data_dir=None, *, model_id: str = ""):
     """主对话模型：真实网关优先，不可用时降级 DemoModel（离线可跑）。
 
     返回 (provider, archive)：archive 供证据记录 expert 身份与父节点对照。
@@ -127,10 +144,10 @@ def build_main_model(data_dir=None):
 
     base = None
     adapter = SuanliAdapter()
-    if adapter.available():
+    if model_id in ("", "openai") and adapter.available():
         # OpenAI 兼容网关：仍走自写适配器桥接
         base = GatewayModelProvider(adapter)
-    elif core_anthropic_available():
+    elif model_id in ("", "anthropic") and core_anthropic_available():
         # Anthropic 兼容网关（DeepSeek）：走 Core 官方 AnthropicProvider。
         # 协议翻译/thinking 回传/prompt cache 由 Core 维护；异常降级与
         # stall 重试由 CoreAnthropicModelProvider 包装保留（2026-11-24 迁移）。

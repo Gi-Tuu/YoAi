@@ -39,12 +39,15 @@ class Session:
     created_at: str
     last_active: str
     message_count: int = 0
+    mode: str = "chat"             # "chat"(沙箱，默认) | "project"(项目模式，可写)
+    project_id: str = ""           # 项目模式时绑定的项目 id
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id, "name": self.name,
             "created_at": self.created_at, "last_active": self.last_active,
             "message_count": self.message_count,
+            "mode": self.mode, "project_id": self.project_id,
         }
 
     @classmethod
@@ -53,6 +56,8 @@ class Session:
             id=d["id"], name=d.get("name", ""),
             created_at=d.get("created_at", ""), last_active=d.get("last_active", ""),
             message_count=int(d.get("message_count", 0)),
+            mode=d.get("mode", "chat") if d.get("mode") in ("chat", "project") else "chat",
+            project_id=str(d.get("project_id", "")),
         )
 
 
@@ -66,6 +71,8 @@ class SessionManager:
         model_factory: Callable[[], Any],
         shared_context_dir: str | Path | None = None,
         agent_kwargs: dict[str, Any] | None = None,
+        agent_kwargs_for_session: Callable[[Any], dict[str, Any] | None] | None = None,
+        memory_dir_for_session: Callable[[Any], Path | None] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -76,6 +83,9 @@ class SessionManager:
         # 构造 agent 时透传的额外参数（如 builtin_tools / workspace_root）。
         # 桌面端必须显式传，否则 session 里的 agent 用默认参数、工具开不起来。
         self._agent_kwargs: dict[str, Any] = dict(agent_kwargs or {})
+        # 项目模式按会话注入：返回 None 表示该会话用默认 _agent_kwargs（聊天模式）
+        self._agent_kwargs_for_session = agent_kwargs_for_session
+        self._memory_dir_for_session = memory_dir_for_session
         self.shared_context_dir = Path(shared_context_dir) if shared_context_dir else self.data_dir / "shared"
         self._sessions: dict[str, Session] = {}
         self._agents: dict[str, YoAiAgent] = {}   # session_id -> 实例缓存
@@ -119,11 +129,13 @@ class SessionManager:
                 os.unlink(tmp)
 
     # --- 会话 CRUD ---
-    def create(self, name: str = "") -> Session:
+    def create(self, name: str = "", *, mode: str = "chat", project_id: str = "") -> Session:
         sid = uuid.uuid4().hex[:12]
         now = _now()
         session = Session(id=sid, name=name or f"会话 {len(self._sessions) + 1}",
-                          created_at=now, last_active=now)
+                          created_at=now, last_active=now,
+                          mode=mode if mode in ("chat", "project") else "chat",
+                          project_id=project_id)
         self._sessions[sid] = session
         self._current_id = sid
         self._save_index()
@@ -182,17 +194,32 @@ class SessionManager:
         if sid not in self._agents:
             # 每个 session 独立 SqliteStore(scope=sid) → 历史按会话隔离、跨启动持久化
             store = SqliteStore(self._history_dir / f"{sid}.db", scope=sid)
+            session = self._sessions[sid]
+            # 项目模式：按会话注入项目工具/记忆目录；聊天模式保持全局共享。
+            kwargs = dict(self._agent_kwargs)
+            if self._agent_kwargs_for_session is not None:
+                override = self._agent_kwargs_for_session(session)
+                if override:
+                    kwargs.update(override)
+            memory_dir = self.shared_context_dir
+            if self._memory_dir_for_session is not None:
+                memory_dir = self._memory_dir_for_session(session) or memory_dir
             agent = YoAiAgent(
                 model=self._model_factory(),
-                data_dir=self.shared_context_dir,   # 个人事实/目标跨会话共享
+                data_dir=memory_dir,                 # 项目模式按项目隔离，聊天模式全局共享
                 memory=store,                        # 构造时传入，Core loop 才会绑定
-                **self._agent_kwargs,                # 桌面端在此注入 builtin_tools 等
+                **kwargs,                            # 桌面端在此注入 builtin_tools / 项目工具等
             )
             self._agents[sid] = agent
 
         self._sessions[sid].last_active = _now()
         self._save_index()
         return self._agents[sid]
+
+    def replace_model_factory(self, factory: Callable[[], Any]) -> None:
+        """Rebuild cached agents on next access, preserving each session's history."""
+        self._model_factory = factory
+        self._agents.clear()
 
     def current_agent(self) -> YoAiAgent:
         return self.agent_for()

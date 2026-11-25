@@ -71,6 +71,8 @@ class YoAiAgent:
         builtin_tools: bool = False,
         workspace_root: str | Path | None = None,
         readonly_roots: list[str | Path] | None = None,
+        project_root: str | Path | None = None,
+        project_name: str = "",
         channel: Any = None,
         policy: Any = None,
         model_timeout: float | None = "env",  # type: ignore[assignment]
@@ -154,7 +156,8 @@ class YoAiAgent:
             core_kwargs["router"] = YoAiRouter()
         self.core = AgentCore(model, **core_kwargs)
         # Core 内省公开方法 → ToolSpec，注册进统一 ToolRegistry。
-        self._all_tool_specs = self._build_all_specs(builtin_tools, workspace_root, readonly_roots)
+        self._all_tool_specs = self._build_all_specs(
+            builtin_tools, workspace_root, readonly_roots, project_root, project_name)
         self.core.register_tools(self._all_tool_specs)
         # 插件热加载（2026-11-24）：data_dir/plugins/*.py 每轮 astream 前扫描，
         # 新增/变更的插件工具 diff 注册——旧会话不重启也能用上新工具。
@@ -172,6 +175,8 @@ class YoAiAgent:
         builtin_tools: bool = False,
         workspace_root: str | Path | None = None,
         readonly_roots: list[str | Path] | None = None,
+        project_root: str | Path | None = None,
+        project_name: str = "",
     ) -> list[Any]:
         """构造基础工具表（capabilities + 实操 + meta），__init__ 与 refresh 共用。"""
         specs = discover(self.capabilities)
@@ -195,6 +200,12 @@ class YoAiAgent:
                 for s in specs:
                     if s.name in ("file_list", "file_read", "shell_run"):
                         s.description = (s.description or "") + _hint
+        # 项目模式：挂载项目文件夹的读写工具（严格限制在项目根内）。
+        # 权限：proj_list/proj_read 进 smart 自动白名单；proj_write/patch 不在白名单
+        # → smart/manual 档下走 Core 审批通道；full(allow_all) 档直接放行。
+        if project_root is not None:
+            from yoai.project_tools import project_tool_specs
+            specs = specs + project_tool_specs(project_root, project_name)
         # list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
         # request_capability 由 Core 的 discovery 机制注册为 meta_tool 并拦截处理。
         specs.append(self._build_list_tools_spec())

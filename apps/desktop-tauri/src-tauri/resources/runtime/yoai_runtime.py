@@ -94,6 +94,8 @@ class Runtime:
     def __init__(self) -> None:
         self.seq = Seq()
         self.agent: Any = None
+        self.model_id = ""
+        self.model_options: dict[str, str] = {}
         self.sessions: Any = None
         self.channel: Any = None          # peer 通讯（通讯页）
         self.registry: dict[str, Any] = {}  # 外部智能体注册表
@@ -105,6 +107,7 @@ class Runtime:
         self.stream_text: dict[str, str] = {}  # run_id -> 累积流式文本（final 空时兜底）
         self.think_buffer: dict[str, str] = {}  # run_id -> 累积 thinking（落盘用）
         self.thinking_store: Any = None
+        self.projects: Any = None          # ProjectStore（项目模式）
         self._write_lock = asyncio.Lock()
 
     # ---- 输出 ----
@@ -117,17 +120,44 @@ class Runtime:
     def _ensure_agent(self) -> None:
         if self.agent is not None:
             return
-        from yoai.bootstrap import agent_kwargs, build_main_model
+        from yoai.bootstrap import agent_kwargs, available_main_models, build_main_model
+        from yoai.user_config import UserConfig
         from yoai.session import SessionManager
+        from yoai.project import ProjectStore
         from yai_core_sidecar_channel import make_sidecar_channel  # 本目录辅助
 
         data_dir = _data_dir()
+        self.projects = ProjectStore(data_dir / "projects")
         channel_cb = make_sidecar_channel(self._request_host)
-        provider, _archive = build_main_model(data_dir)
+        self.model_options = available_main_models()
+        preferred = UserConfig(data_dir).load().get("desktop_model")
+        self.model_id = preferred if isinstance(preferred, str) and preferred in self.model_options else next(iter(self.model_options))
+        provider, _archive = build_main_model(data_dir, model_id=self.model_id)
+        def kwargs_for_session(session: Any) -> dict[str, Any] | None:
+            """项目模式：给该会话的 agent 挂项目读写工具；聊天模式返回 None 用默认。"""
+            if getattr(session, "mode", "chat") != "project":
+                return None
+            proj = self.projects.get(getattr(session, "project_id", ""))
+            if proj is None:
+                return None
+            return {
+                "project_root": proj.path,
+                "project_name": proj.name,
+            }
+
+        def memory_dir_for_session(session: Any) -> Path | None:
+            """项目模式：记忆按项目隔离；聊天模式用全局共享目录。"""
+            if getattr(session, "mode", "chat") != "project":
+                return None
+            pid = getattr(session, "project_id", "")
+            return data_dir / "projects" / pid / "memory" if pid else None
+
         self.sessions = SessionManager(
             data_dir / "sessions",
             model_factory=lambda: provider,
             agent_kwargs=agent_kwargs(data_dir, channel=channel_cb),
+            agent_kwargs_for_session=kwargs_for_session,
+            memory_dir_for_session=memory_dir_for_session,
         )
         # 首次启动（数据目录为空）必须建初始会话——旧端 app.py main() 语义，
         # 否则 current_agent() 会 KeyError，新用户第一句话就失败。
@@ -201,11 +231,14 @@ class Runtime:
 
     def _snapshot(self) -> dict[str, Any]:
         from yoai.bootstrap import clean_final_text
+        from yai_core.kernel.context import Context
+        context = Context("")
         sessions = [s.to_dict() for s in self.sessions.list_sessions()]
         current = self.sessions.current
         history: list[dict[str, Any]] = []
         try:
             for message in self.agent.core.memory.history():
+                context.add(message)
                 role = getattr(message, "role", "")
                 if role not in ("user", "assistant"):
                     continue
@@ -246,7 +279,7 @@ class Runtime:
                 thinking_log = self.thinking_store.load(current.id)
             except Exception:  # noqa: BLE001
                 pass
-        return snapshot(
+        state = snapshot(
             sessions=sessions,
             current_id=current.id if current else "",
             history=history,
@@ -256,11 +289,41 @@ class Runtime:
             write_stats=write_stats,
             tools=tools,
             thinking_log=thinking_log,
+            projects=self.projects.to_list() if self.projects is not None else [],
         )
+
+        state["model_id"] = self.model_id
+        state["model_options"] = [{"id": key, "label": label} for key, label in self.model_options.items()]
+        state["context_usage"] = {"used": min(context.total_chars(), context.max_chars), "limit": context.max_chars}
+        return state
+
+    async def _select_model(self, model_id: str) -> None:
+        from yoai.bootstrap import build_main_model
+        from yoai.user_config import UserConfig
+
+        self._ensure_agent()
+        if model_id not in self.model_options or any(not task.done() for task in self.tasks.values()):
+            await self.send(error("protocol", "模型不可用或任务仍在执行"))
+            return
+        if model_id == self.model_id:
+            return
+        data_dir = _data_dir()
+        provider, _archive = build_main_model(data_dir, model_id=model_id)
+        UserConfig(data_dir).save({"desktop_model": model_id})
+        self.sessions.replace_model_factory(lambda: provider)
+        self.agent = self.sessions.current_agent()
+        self.model_id = model_id
+        await self._push_snapshot()
+        await self._push_permission_state()
 
     def _session_id(self) -> str:
         current = getattr(self.sessions, "current", None) if self.sessions else None
         return str(current.id) if current else ""
+
+    def _agents_clear(self) -> None:
+        """清空会话 agent 缓存（项目变更/删除后必须重建，否则工具集是旧的）。"""
+        if self.sessions is not None and hasattr(self.sessions, "_agents"):
+            self.sessions._agents.clear()
 
     def _sync_permission_for_session(self, agent: Any = None, *, is_new: bool = False) -> str:
         """把指定 agent 的 policy 设为「该会话自己的」档位，返回档位名。
@@ -607,6 +670,8 @@ class Runtime:
             self._sync_permission_for_session(self.agent)   # 新会话固化自己的初始档位
             await self._push_snapshot()
             await self._push_permission_state()
+        elif typ == "model.select":
+            await self._select_model(str(cmd.get("model_id", "")))
         elif typ == "session.switch":
             self._ensure_agent()
             self.sessions.switch(str(cmd.get("session_id", "")))
@@ -626,9 +691,15 @@ class Runtime:
             await self._push_snapshot()
         elif typ == "session.delete":
             self._ensure_agent()
+            previous = self._session_id()
             self.sessions.delete(str(cmd.get("session_id", "")))
-            self.agent = self.sessions.current_agent()
+            if self.sessions.current is None:
+                self.sessions.create("新会话")
+            if self._session_id() != previous:
+                self.agent = self.sessions.current_agent()
+                self._sync_permission_for_session()
             await self._push_snapshot()
+            await self._push_permission_state()
         elif typ == "chat.state":
             self._ensure_agent()
             await self._push_chat_state()
@@ -691,6 +762,53 @@ class Runtime:
                     # 只改当前会话；全局默认不变（新会话仍沿用原默认）
                     cfg.set_permission(sid, level)
                     await self._push_permission_state()
+        elif typ == "project.create":
+            # 建项目（绑定宿主机文件夹）+ 在该项目内建一条项目模式会话。
+            # 聊天模式会话不受影响；已有会话不自动归类。
+            self._ensure_agent()
+            from yoai.project import ProjectError
+            try:
+                proj = self.projects.create(
+                    str(cmd.get("name", "")), str(cmd.get("path", "")))
+            except ProjectError as exc:
+                await self.send(error("project", str(exc)))
+            else:
+                sess = self.sessions.create(
+                    str(cmd.get("session_name", "")) or f"{proj.name} · 会话",
+                    mode="project", project_id=proj.id)
+                self.agent = self.sessions.current_agent()
+                self._sync_permission_for_session(self.agent)
+                await self._push_snapshot()
+                await self._push_permission_state()
+        elif typ in ("project.list", "project.state"):
+            self._ensure_agent()
+            await self._push_snapshot()
+        elif typ == "project.delete":
+            self._ensure_agent()
+            # 只删项目定义，不删项目内的会话（它们退回聊天模式语义，历史保留）。
+            pid = str(cmd.get("project_id", ""))
+            self.projects.delete(pid)
+            for sess in self.sessions.list_sessions():
+                if getattr(sess, "project_id", "") == pid:
+                    sess.project_id = ""
+                    sess.mode = "chat"
+            self.sessions._save_index()
+            self._agents_clear()
+            self.agent = self.sessions.current_agent() if self.sessions.current() else None
+            await self._push_snapshot()
+        elif typ == "session.new_in_project":
+            # 在项目内新建会话（项目模式下复用项目工具，记忆按项目隔离）
+            self._ensure_agent()
+            pid = str(cmd.get("project_id", ""))
+            if self.projects.get(pid) is None:
+                await self.send(error("project", f"项目不存在：{pid}"))
+            else:
+                sess = self.sessions.create(
+                    str(cmd.get("name", "")) or "新会话", mode="project", project_id=pid)
+                self.agent = self.sessions.current_agent()
+                self._sync_permission_for_session(self.agent)
+                await self._push_snapshot()
+                await self._push_permission_state()
         elif typ == "shutdown":
             for task in list(self.tasks.values()):
                 task.cancel()

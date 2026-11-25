@@ -87,8 +87,9 @@ def snapshot(*, sessions: list[dict[str, Any]], current_id: str,
              history: list[dict[str, Any]], model: str,
              facts: dict[str, str], goals: list[dict[str, Any]],
              write_stats: dict[str, int], tools: list[str],
-             thinking_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """会话全景状态：会话列表 + 当前历史 + 记忆侧栏数据 + 历史 thinking。"""
+             thinking_log: list[dict[str, Any]] | None = None,
+             projects: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """会话全景状态：会话列表 + 当前历史 + 记忆侧栏数据 + 历史 thinking + 项目列表。"""
     return {
         "v": PROTOCOL_VERSION, "type": "snapshot",
         "sessions": sessions, "current_id": current_id,
@@ -96,6 +97,7 @@ def snapshot(*, sessions: list[dict[str, Any]], current_id: str,
         "facts": facts, "goals": goals,
         "write_stats": write_stats, "tools": tools,
         "thinking_log": thinking_log or [],
+        "projects": projects or [],
     }
 
 

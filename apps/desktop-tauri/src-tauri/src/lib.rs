@@ -133,6 +133,7 @@ fn runtime_status(state: State<'_, RuntimeState>) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         // 单实例守卫（对齐旧端 QLocalSocket 语义）：第二实例把已运行的窗口唤到前台
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
