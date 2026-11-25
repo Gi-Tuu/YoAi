@@ -429,3 +429,61 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 .project-hint { color: var(--weak); font-size: var(--fs-cap); margin-left: 4px; }
 .project-icon { padding: 2px 6px; font-size: var(--fs-note); }
 .project-empty { color: var(--weak); font-size: var(--fs-cap); padding: 4px var(--sp-2); }
+
+/* ===== 产物 / 文件改动卡片（change set UI）===== */
+.artifacts-panel, .changes-panel {
+  margin: var(--sp-2) 0; border: 1px solid var(--rule);
+  background: var(--surface); border-radius: 0;
+}
+.artifacts-head {
+  padding: var(--sp-2) var(--sp-3); font-size: var(--fs-note);
+  color: var(--brick); border-bottom: 1px solid var(--rule);
+}
+.artifact-item {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--rule);
+}
+.artifact-item:first-of-type { border-top: none; }
+.artifact-icon { color: var(--accent); font-size: 16px; }
+.artifact-meta { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.artifact-meta strong { font-size: var(--fs-body); color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.artifact-meta small { font-size: var(--fs-cap); color: var(--weak); }
+.artifact-download {
+  background: transparent; border: 1px solid var(--rule); color: var(--ink);
+  cursor: pointer; padding: 2px 8px; border-radius: 0;
+}
+.artifact-download:hover { color: var(--brick); border-color: var(--brick); }
+
+.changes-head {
+  width: 100%; display: flex; align-items: center; gap: var(--sp-2);
+  background: transparent; border: none; cursor: pointer;
+  padding: var(--sp-2) var(--sp-3); font-size: var(--fs-body); color: var(--ink);
+  text-align: left;
+}
+.changes-head:hover { color: var(--brick); }
+.changes-total { margin-left: auto; display: flex; gap: var(--sp-2); font-family: var(--font-num); font-size: var(--fs-note); }
+.stat-add { color: var(--ok); }
+.stat-remove { color: var(--vermilion); }
+.change-arrow { color: var(--weak); font-size: var(--fs-note); }
+.changes-list { border-top: 1px solid var(--rule); max-height: 320px; overflow-y: auto; }
+.change-row { border-bottom: 1px solid var(--rule); }
+.change-row:last-child { border-bottom: none; }
+.change-row-head {
+  width: 100%; display: flex; align-items: center; gap: var(--sp-2);
+  background: transparent; border: none; cursor: pointer;
+  padding: var(--sp-1) var(--sp-3); font-size: var(--fs-note); color: var(--ink); text-align: left;
+}
+.change-row-head:hover { background: var(--surface-2); }
+.change-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
+.change-stat { display: flex; gap: var(--sp-2); font-family: var(--font-num); font-size: var(--fs-cap); }
+.change-detail { padding: var(--sp-2) var(--sp-3); background: var(--bg); }
+.change-path { font-family: var(--font-mono); font-size: var(--fs-cap); color: var(--dim); margin-bottom: var(--sp-1); word-break: break-all; }
+.diff-empty { color: var(--weak); font-size: var(--fs-cap); padding: var(--sp-1) 0; }
+.diff-body { max-height: 260px; overflow: auto; border: 1px solid var(--rule); }
+.diff-line { display: flex; align-items: flex-start; gap: 6px; padding: 1px 6px; font-size: 12px; line-height: 1.5; }
+.diff-context { color: var(--dim); }
+.diff-add { background: rgba(24, 95, 53, 0.12); color: var(--ok); }
+.diff-remove { background: rgba(163, 45, 45, 0.12); color: var(--vermilion); }
+.diff-sign { width: 10px; flex-shrink: 0; font-family: var(--font-mono); }
+.diff-num { width: 28px; flex-shrink: 0; text-align: right; color: var(--weak); font-family: var(--font-num); font-size: 11px; }
+.diff-text { flex: 1; white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); }

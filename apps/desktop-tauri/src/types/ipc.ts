@@ -40,6 +40,20 @@ export interface ProjectInfo {
   created_at: string;
 }
 
+export interface DiffOp { kind: "context" | "add" | "remove"; text: string; old_line?: number; new_line?: number; }
+export interface FileChangeRecord {
+  id: string; at: string; path: string; action: "create" | "patch";
+  added: number; removed: number; diff: DiffOp[];
+  session_id: string; project_id: string; run_id: string;
+  after?: string;  // 产物(create)带全文供下载；改动(patch)省略
+}
+
+export interface FileChangedMsg extends BaseMsg {
+  type: "file.changed";
+  task_id: string; run_id: string; seq: number;
+  change: FileChangeRecord;
+}
+
 export interface HistoryEntry {
   role: string;
   text: string;
@@ -75,6 +89,8 @@ export interface SnapshotMsg extends BaseMsg {
   tools: string[];
   thinking_log: ThinkingRecord[];   // 历史 thinking（YoAi 侧持久化）
   projects?: ProjectInfo[];          // 项目列表
+  artifacts?: FileChangeRecord[];     // 新建文件（产物）
+  changes?: FileChangeRecord[];       // 修改文件（改动）
 }
 
 export interface ChatEntry {
@@ -199,7 +215,7 @@ export interface ErrorMsg extends BaseMsg {
 
 export type RuntimeMsg =
   | ReadyMsg | StatusMsg | EventMsg | FinalMsg | ApprovalRequestMsg | ErrorMsg
-  | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg | PermissionStateMsg;
+  | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg | PermissionStateMsg | FileChangedMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =

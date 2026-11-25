@@ -62,7 +62,7 @@ for _p in _candidates:
 
 from protocol import (  # noqa: E402  (自举后导入)
     PROTOCOL_VERSION, Seq, approval_request, archive_state, chat_msg,
-    chat_state, encode, error, event, final, permission_state, ready,
+    chat_state, encode, error, event, file_changed, final, permission_state, ready,
     snapshot, status,
 )
 
@@ -108,6 +108,7 @@ class Runtime:
         self.think_buffer: dict[str, str] = {}  # run_id -> 累积 thinking（落盘用）
         self.thinking_store: Any = None
         self.projects: Any = None          # ProjectStore（项目模式）
+        self.file_changes: Any = None      # FileChangeStore（产物/改动记录）
         self._write_lock = asyncio.Lock()
 
     # ---- 输出 ----
@@ -124,10 +125,12 @@ class Runtime:
         from yoai.user_config import UserConfig
         from yoai.session import SessionManager
         from yoai.project import ProjectStore
+        from yoai.file_changes import FileChangeStore
         from yai_core_sidecar_channel import make_sidecar_channel  # 本目录辅助
 
         data_dir = _data_dir()
         self.projects = ProjectStore(data_dir / "projects")
+        self.file_changes = FileChangeStore(data_dir)
         channel_cb = make_sidecar_channel(self._request_host)
         self.model_options = available_main_models()
         preferred = UserConfig(data_dir).load().get("desktop_model")
@@ -143,6 +146,8 @@ class Runtime:
             return {
                 "project_root": proj.path,
                 "project_name": proj.name,
+                "file_change_store": self.file_changes,
+                "change_context": {"session_id": session.id, "project_id": proj.id},
             }
 
         def memory_dir_for_session(session: Any) -> Path | None:
@@ -290,6 +295,10 @@ class Runtime:
             tools=tools,
             thinking_log=thinking_log,
             projects=self.projects.to_list() if self.projects is not None else [],
+            **(self.file_changes.summary(
+                session_id=self._session_id(),
+                project_id=getattr(current, "project_id", "") if current else "",
+            ) if self.file_changes is not None else {"artifacts": [], "changes": []}),
         )
 
         state["model_id"] = self.model_id
@@ -513,6 +522,10 @@ class Runtime:
                                "running"))
 
         async def _run() -> None:
+            # 让文件操作记录带上本轮 run_id（产物/改动卡片按轮次分组）
+            ctx = getattr(self.agent, "change_context", None)
+            if isinstance(ctx, dict):
+                ctx["run_id"] = run_id
             evidence_meta: dict[str, Any] = {}
             try:
                 from yoai.evidence import ExecutionEvidenceCollector
@@ -570,6 +583,18 @@ class Runtime:
                             text = clean_final_text(text)
                         except Exception:  # noqa: BLE001
                             pass
+                        # 本轮的文件操作 → file.changed，前端实时出产物/改动卡片
+                        if self.file_changes is not None:
+                            try:
+                                mine = [r for r in self.file_changes.load(
+                                    session_id=self._session_id())
+                                    if r.get("run_id") == run_id]
+                                for rec in mine:
+                                    await self.send(file_changed(
+                                        task_id, run_id, self.seq.for_run(task_id, run_id),
+                                        record=self.file_changes._public(rec)))
+                            except Exception as exc:  # noqa: BLE001
+                                _log(f"file.changed push failed: {exc}")
                         await self.send(final(task_id, run_id, seq, text))
                         await self.send(status(task_id, run_id,
                                                self.seq.for_run(task_id, run_id),

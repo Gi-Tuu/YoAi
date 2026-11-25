@@ -25,13 +25,14 @@ export interface RunState {
   thinking: string;                  // 累积思考（默认折叠）
   finalText: string;
   approval: { tool: string; question: string; detail: string } | null;
+  fileChanges: import("../types/ipc").FileChangeRecord[];  // 本轮产物/文件改动
   startedAt: number;
   endedAt?: number;
 }
 
 const emptyRun = (taskId: string, runId: string, input: string): RunState => ({
   taskId, runId, input, state: "queued", detail: "", events: [],
-  streamText: new Map(), thinking: "", finalText: "", approval: null,
+  streamText: new Map(), thinking: "", finalText: "", approval: null, fileChanges: [],
   startedAt: Date.now(),
 });
 
@@ -85,6 +86,11 @@ export function useTaskStream(messages: RuntimeMsg[]) {
           next.set(msg.run_id, { ...run, approval: {
             tool: msg.tool, question: msg.question, detail: msg.detail,
           } });
+        } else if (msg.type === "file.changed") {
+          const run = next.get(msg.run_id) ?? emptyRun(msg.task_id, msg.run_id, "");
+          if (!run.fileChanges.some((c) => c.id === msg.change.id)) {
+            next.set(msg.run_id, { ...run, fileChanges: [...run.fileChanges, msg.change] });
+          }
         }
       }
       return next;

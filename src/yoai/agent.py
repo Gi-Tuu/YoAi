@@ -73,6 +73,8 @@ class YoAiAgent:
         readonly_roots: list[str | Path] | None = None,
         project_root: str | Path | None = None,
         project_name: str = "",
+        file_change_store: Any = None,   # FileChangeStore：记录项目写操作
+        change_context: dict[str, str] | None = None,  # {session_id, project_id}
         channel: Any = None,
         policy: Any = None,
         model_timeout: float | None = "env",  # type: ignore[assignment]
@@ -166,6 +168,8 @@ class YoAiAgent:
             core_kwargs["router"] = YoAiRouter()
         self.core = AgentCore(model, **core_kwargs)
         # Core 内省公开方法 → ToolSpec，注册进统一 ToolRegistry。
+        self.file_change_store = file_change_store
+        self.change_context = dict(change_context or {})
         self._all_tool_specs = self._build_all_specs(
             builtin_tools, workspace_root, readonly_roots, project_root, project_name)
         self.core.register_tools(self._all_tool_specs)
@@ -215,7 +219,24 @@ class YoAiAgent:
         # → smart/manual 档下走 Core 审批通道；full(allow_all) 档直接放行。
         if project_root is not None:
             from yoai.project_tools import project_tool_specs
-            specs = specs + project_tool_specs(project_root, project_name)
+
+            def _on_change(action: str, path: str, before: str, after: str) -> None:
+                """项目写操作落记录（产物/改动 UI 的数据源）。失败不影响主流程。"""
+                store = getattr(self, "file_change_store", None)
+                if store is None:
+                    return
+                try:
+                    store.append(
+                        session_id=self.change_context.get("session_id", ""),
+                        project_id=self.change_context.get("project_id", ""),
+                        run_id=self.change_context.get("run_id", ""),
+                        path=path, action=action, before=before, after=after,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    import sys as _sys
+                    print(f"[yoai] file change record failed: {exc}", file=_sys.stderr, flush=True)
+
+            specs = specs + project_tool_specs(project_root, project_name, on_change=_on_change)
         # list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
         # request_capability 由 Core 的 discovery 机制注册为 meta_tool 并拦截处理。
         specs.append(self._build_list_tools_spec())

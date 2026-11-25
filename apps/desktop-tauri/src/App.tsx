@@ -11,6 +11,7 @@ import { ProcessPanel } from "./components/ProcessPanel";
 import { Markdown } from "./components/Markdown";
 import { SideCards } from "./components/SideCards";
 import { ProjectPanel } from "./components/ProjectPanel";
+import { Artifacts, Changes } from "./components/FileChanges";
 import { shrinkWindow, restoreWindow } from "./lib/capsuleWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControls } from "./components/WindowControls";
@@ -61,6 +62,10 @@ function ChatRun({ run, streaming, onApproval }: {
       </header>
 
       <ProcessPanel events={run.events} thinking={run.thinking} />
+
+      {/* 产物（新建文件）与文件改动（+X/-Y，可开展行级 diff）*/}
+      <Artifacts records={run.fileChanges.filter((c) => c.action === "create")} />
+      <Changes records={run.fileChanges.filter((c) => c.action === "patch")} />
 
       {/* 错误必须进正文（旧端静默失败修复语义） */}
       {run.events.filter((e) => e.name === "error" || e.name === "permission_denied" || e.name === "budget_exceeded")

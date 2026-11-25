@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from yai_core import build_spec
 
@@ -19,8 +19,14 @@ from yoai.project import ProjectError, resolve_in_project
 
 _MAX_READ = 50000
 
+# 写操作成功回调：由 runtime 注入，把操作记录到 FileChangeStore。
+# 签名 (action, rel_path, before, after) -> None
+OnChange = Callable[[str, str, str, str], None]
 
-def project_tool_specs(root: str | Path, project_name: str = "") -> list[Any]:
+
+def project_tool_specs(
+    root: str | Path, project_name: str = "", *, on_change: OnChange | None = None,
+) -> list[Any]:
     """为项目构造 4 个工具 spec。root 必须是已校验的项目文件夹。"""
     base = Path(root).resolve()
     label = project_name or base.name
@@ -78,6 +84,8 @@ def project_tool_specs(root: str | Path, project_name: str = "") -> list[Any]:
             p.write_text(content, encoding="utf-8")
         except OSError as exc:
             return f"写入失败：{type(exc).__name__}: {exc}"
+        if on_change is not None:
+            on_change("create", path, "", content)
         return json.dumps({
             "path": path, "created": True, "size": len(content),
             "detail": _preview(p, "write"),
@@ -96,9 +104,12 @@ def project_tool_specs(root: str | Path, project_name: str = "") -> list[Any]:
         if actual != expected_sha256:
             return f"冲突：文件已被修改（期望 {expected_sha256[:8]}，实际 {actual[:8]}），请重新 proj_read"
         try:
+            before = p.read_text(encoding="utf-8", errors="replace")
             p.write_text(content, encoding="utf-8")
         except OSError as exc:
             return f"写入失败：{type(exc).__name__}: {exc}"
+        if on_change is not None:
+            on_change("patch", path, before, content)
         return json.dumps({
             "path": path, "updated": True, "size": len(content),
             "detail": _preview(p, "patch"),

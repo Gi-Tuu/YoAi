@@ -88,7 +88,9 @@ def snapshot(*, sessions: list[dict[str, Any]], current_id: str,
              facts: dict[str, str], goals: list[dict[str, Any]],
              write_stats: dict[str, int], tools: list[str],
              thinking_log: list[dict[str, Any]] | None = None,
-             projects: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+             projects: list[dict[str, Any]] | None = None,
+             artifacts: list[dict[str, Any]] | None = None,
+             changes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """会话全景状态：会话列表 + 当前历史 + 记忆侧栏数据 + 历史 thinking + 项目列表。"""
     return {
         "v": PROTOCOL_VERSION, "type": "snapshot",
@@ -98,6 +100,17 @@ def snapshot(*, sessions: list[dict[str, Any]], current_id: str,
         "write_stats": write_stats, "tools": tools,
         "thinking_log": thinking_log or [],
         "projects": projects or [],
+        "artifacts": artifacts or [],
+        "changes": changes or [],
+    }
+
+
+def file_changed(task_id: str, run_id: str, seq: int, *, record: dict[str, Any]) -> dict[str, Any]:
+    """一次文件写操作完成（产物或改动），供前端实时追加卡片。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "file.changed",
+        "task_id": task_id, "run_id": run_id, "seq": seq,
+        "change": record,
     }
 
 
