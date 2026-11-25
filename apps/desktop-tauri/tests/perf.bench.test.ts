@@ -28,8 +28,8 @@ describe("事件规模基准（虚拟化 + 默认折叠）", () => {
       const { container, unmount } = render(React.createElement(ProcessPanel, { events, thinking: "" }));
       const elapsed = performance.now() - t0;
       const domRows = container.querySelectorAll(".proc-row").length;
-      // 关键断言：默认折叠下 DOM 行数与 n 无关（虚拟化 + 只显示实时区）
-      expect(domRows).toBeLessThanOrEqual(3);
+      // 关键断言：默认折叠下 DOM 行数与 n 无关（只显示摘要）
+      expect(domRows).toBe(0);
       console.log(`[bench] n=${n} 折叠渲染=${elapsed.toFixed(1)}ms DOM行=${domRows}`);
       unmount();
     });

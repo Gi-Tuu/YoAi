@@ -1,7 +1,7 @@
-/** 回归：hello 后的 snapshot 必须驱动会话选择器/模型 chip/侧栏。
+/** 回归：hello 后的 snapshot 必须驱动会话面板/输入区/侧栏。
  *  定位 GUI 中"ready 到了但快照没加载"的问题。 */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 
 const listeners: Set<(m: unknown) => void> = new Set();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => {}) }));
@@ -33,7 +33,7 @@ function emit(m: unknown) { for (const l of listeners) l(m); }
 describe("App snapshot 消费", () => {
   beforeEach(() => { listeners.clear(); localStorage.clear(); });
 
-  it("收到 ready + snapshot 后显示会话名、模型名、事实", async () => {
+  it("收到 ready + snapshot 后显示会话、输入区和事实", async () => {
     render(<App />);
     // 等 useEffect 注册 listener（listen 是异步 mock）
     await waitFor(() => expect(listeners.size).toBeGreaterThan(0));
@@ -43,14 +43,43 @@ describe("App snapshot 消费", () => {
       emit(snap);
       await new Promise((r) => setTimeout(r, 50));  // 等 requestAnimationFrame 批量 flush
     });
-    await waitFor(() => {
-      expect(screen.getByTitle("切换会话")).toBeTruthy();
-    });
-    const select = screen.getByTitle("切换会话") as HTMLSelectElement;
-    expect(select.value).toBe("s1");
-    expect(select.options[0]?.text).toContain("测试会话");
-    expect(screen.getAllByText(/spark-x2\.6/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("region", { name: "会话" })).toBeNull();
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "对话" }));
+    const sessions = await screen.findByRole("region", { name: "会话" });
+    expect(sessions.querySelector('[aria-current="true"]')?.textContent).toContain("测试会话");
+    expect(screen.getByRole("button", { name: /新建/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重命名 测试会话" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "删除 测试会话" })).toBeTruthy();
+    expect(screen.queryByText(/模型 · spark-x2\.6/)).toBeNull();
+    expect(screen.queryByText("就绪")).toBeNull();
+    expect(screen.queryByText("我的对话")).toBeNull();
+    expect(screen.getByRole("button", { name: "对话" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "最小化" })).toBeTruthy();
+    const input = screen.getByRole("textbox", { name: "输入任务" });
+    const permission = screen.getByRole("combobox", { name: "权限" });
+    expect(permission.closest(".composer")).toBe(input.closest(".composer"));
+    expect(permission.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText(/主题偏好/)).toBeNull();
+    const facts = screen.getByRole("button", { name: /个人事实/ });
+    fireEvent.pointerEnter(facts);
+    const preview = await screen.findByRole("region", { name: "个人事实" });
+    fireEvent.pointerLeave(preview);
+    await waitFor(() => expect(screen.queryByText(/主题偏好/)).toBeNull());
+    fireEvent.pointerEnter(screen.getByRole("button", { name: /个人事实/ }));
+    const factsPanel = await screen.findByRole("region", { name: "个人事实" });
+    fireEvent.click(factsPanel);
+    fireEvent.pointerLeave(factsPanel);
     expect(screen.getByText(/主题偏好/)).toBeTruthy();
+    const memory = screen.getByRole("button", { name: /本轮记忆/ });
+    await act(async () => { memory.click(); });
+    expect(screen.getByText(/主题偏好/)).toBeTruthy();
+    expect(screen.getByText("本轮记忆 +2")).toBeTruthy();
+    const memoryPanel = screen.getByRole("region", { name: "本轮记忆" });
+    expect(Number(memoryPanel.style.zIndex)).toBeGreaterThan(Number(factsPanel.style.zIndex));
+    fireEvent.click(factsPanel);
+    expect(Number(factsPanel.style.zIndex)).toBeGreaterThan(Number(memoryPanel.style.zIndex));
+    fireEvent.click(screen.getByRole("button", { name: "收起个人事实" }));
+    expect(screen.queryByText(/主题偏好/)).toBeNull();
   });
 });
 
