@@ -10,6 +10,7 @@ key 从 .env 读到内存后使用，不回显、不写日志、不进结果。
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -295,14 +296,7 @@ class SuanliAdapter(PeerAdapter):
 
         # 聚合：content 缺失时用 reasoning_content（与非流式 _extract_text 同语义）
         full_text = "".join(content_parts).strip() or "".join(reasoning_parts).strip()
-        calls = []
-        for idx in sorted(tool_calls):
-            slot = tool_calls[idx]
-            try:
-                slot["function"]["arguments"] = _json.loads(slot["function"]["arguments"])
-            except Exception:  # noqa: BLE001
-                slot["function"]["arguments"] = {}
-            calls.append(slot)
+        calls = flatten_stream_tool_calls(tool_calls)
         usage_norm = {
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
@@ -361,6 +355,31 @@ def _extract_text(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
             if isinstance(usage_raw.get("completion_tokens_details"), dict) else 0
         )
     return text.strip(), usage
+
+
+def flatten_stream_tool_calls(raw_calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    """流式 SSE 聚合结果与 GatewayModelProvider 期望对齐（扁平 name/arguments）。
+
+    OpenAI 增量格式是 {"function":{"name":..,"arguments":"<json>"}}；
+    GatewayModelProvider 读 tc["name"]/tc["arguments"]，不扁平化会被静默丢弃——
+    这正是"模型决定调工具但工具从不执行"的根因。
+    """
+    out: list[dict[str, Any]] = []
+    for idx in sorted(raw_calls):
+        slot = raw_calls[idx]
+        fn = slot.get("function") or {}
+        arguments = fn.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except (ValueError, TypeError):
+                arguments = {}
+        out.append({
+            "id": str(slot.get("id", "")),
+            "name": str(fn.get("name", "")),
+            "arguments": arguments if isinstance(arguments, dict) else {},
+        })
+    return out
 
 
 def _extract_tool_calls(data: dict[str, Any]) -> list[dict[str, Any]]:

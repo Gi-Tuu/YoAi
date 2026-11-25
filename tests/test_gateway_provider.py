@@ -90,3 +90,29 @@ def test_describe_is_honest():
     adapter = FakeAdapter(AdapterResult(True, text="ok", level="L2"))
     d = GatewayModelProvider(adapter).describe()
     assert d["mode"] == "text_only" and d["tool_calls"] is False
+
+
+def test_stream_tool_calls_flattened_for_gateway():
+    """流式 SSE 聚合的嵌套 tool_calls 必须扁平化，否则网关层静默丢弃。"""
+    from yoai.models.suanli_adapter import flatten_stream_tool_calls
+
+    raw = {
+        0: {"id": "call_1", "type": "function",
+            "function": {"name": "remember_fact",
+                         "arguments": '{"key":"偏好","value":"深色"}'}},
+        1: {"id": "call_2", "type": "function",
+            "function": {"name": "recall_fact", "arguments": '{"key":"偏好"}'}},
+    }
+    calls = flatten_stream_tool_calls(raw)
+    assert len(calls) == 2
+    assert calls[0] == {"id": "call_1", "name": "remember_fact",
+                        "arguments": {"key": "偏好", "value": "深色"}}
+    assert calls[1]["name"] == "recall_fact"
+
+    # GatewayModelProvider 能正确转成 ToolCallRequest
+    adapter = FakeAdapter(AdapterResult(True, text="", level="L2", tool_calls=calls))
+    resp = asyncio.run(GatewayModelProvider(adapter).achat([{"role": "user", "content": "x"}]))
+    assert len(resp.tool_calls) == 2
+    assert resp.tool_calls[0].name == "remember_fact"
+    assert resp.tool_calls[0].arguments["key"] == "偏好"
+    assert resp.tool_calls[1].name == "recall_fact"

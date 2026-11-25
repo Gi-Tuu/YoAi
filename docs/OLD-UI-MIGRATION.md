@@ -114,3 +114,28 @@
 
 **实证**：42 条历史中 DSML 乱码 0 条，正常讨论 DSML 的消息 1 条保留。
 全量 **242 passed**。
+
+## 九、工具调用静默失败根治（2026-11-25，用户截图触发）
+
+**现象**（用户截图中 YoAi 历史回复）：模型说"recall_fact 发出去了，没拿到任何结果块"，
+并给出判据：两个 key（主题偏好 / YoAi 项目）在不在存储里。
+
+**调查**：
+1. 两个 key 都在（dist/output 的 agent.context）→ 写入通，问题在"结果回传给模型"。
+2. 直接测 SuanliAdapter.send()（非流式）→ tool_calls 解析正确（扁平 name/arguments）。
+3. 真实 astream（流式）→ 模型 thinking 明确说要调工具、输出了工具聚焦，
+   **但没有任何 tool_call 事件，直接 done**。
+
+**根因**：SuanliAdapter 两条路径的 tool_calls 格式不一致——
+- 非流式 `_extract_tool_calls`：扁平 `{"id","name","arguments"}` ✓
+- 流式 `_send_stream`：OpenAI 原始嵌套 `{"function":{"name","arguments"}}` ✗
+- `GatewayModelProvider` 读 `tc["name"]`/`tc["arguments"]` → 流式调用全被静默丢弃
+
+桌面生产默认流式 → 所有工具调用都不执行。这比 11-24 的 DSML 问题更深一层。
+
+**修复**：抽 `flatten_stream_tool_calls()` 把流式聚合结果扁平化，两路径格式统一。
+回归测试 `test_stream_tool_calls_flattened_for_gateway` + 更新 `test_suanli_stream_sse` 断言。
+
+**端到端验证**：真实网关跑"记住回环测试=通了并读回"→
+`tool_call remember_fact → tool_result → tool_call recall_fact → tool_result → done`，
+存储里 `回环测试=通了`。全量 **244 passed**。

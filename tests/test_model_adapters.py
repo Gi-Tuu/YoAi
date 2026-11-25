@@ -228,7 +228,10 @@ def test_suanli_stream_sse(monkeypatch, tmp_path):
     assert r.ok is True and r.text == "你好"
     assert a.drain_text() == [(0, "你"), (0, "好")]
     assert a.drain_thinking() == ["先查"]
-    assert r.tool_calls and r.tool_calls[0]["function"]["arguments"] == {"q": "x"}
+    # 扁平格式（与 GatewayModelProvider / 非流式路径一致）
+    assert r.tool_calls and r.tool_calls[0]["name"] == "lookup"
+    assert r.tool_calls[0]["arguments"] == {"q": "x"}
+    assert "function" not in r.tool_calls[0]
     assert r.meta["usage"]["prompt_tokens"] == 5
     assert r.meta["usage"]["completion_tokens"] == 3
     assert a.drain_text() == []   # drain 后清空
