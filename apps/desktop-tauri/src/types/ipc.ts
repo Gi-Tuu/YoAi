@@ -376,6 +376,19 @@ export interface RsiRolledBackMsg extends BaseMsg {
   };
 }
 
+export interface RsiMetaStateMsg extends BaseMsg {
+  type: "rsi.meta.state";
+  status: {
+    active: Record<string, unknown> & { version: number };
+    versions: Array<Record<string, unknown> & { version: number }>;
+  };
+}
+
+export interface RsiMetaAckMsg extends BaseMsg {
+  type: "rsi.meta.ack";
+  message: string;
+}
+
 export interface RsiPromotedMsg extends BaseMsg {
   type: "rsi.promoted";
   decision: {
@@ -458,7 +471,7 @@ export type RuntimeMsg =
   | BoundaryStateMsg | RsiTriggeredMsg | RsiValidatedMsg | RsiPromotedMsg
   | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg
   | McpStateMsg | McpConfigMsg | McpAckMsg | SkillStateMsg | SkillConfigMsg
-  | SkillAckMsg | SkillMarketStateMsg;
+  | SkillAckMsg | SkillMarketStateMsg | RsiMetaStateMsg | RsiMetaAckMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -503,6 +516,9 @@ export type Command =
   | { v: 1; type: "rsi.promote_active"; trial_id: string; approved_by: string; reason?: string }
   | { v: 1; type: "rsi.reject"; trial_id: string; reason?: string }
   | { v: 1; type: "rsi.rollback"; node_id: string }
+  | { v: 1; type: "rsi.meta_status" }
+  | { v: 1; type: "rsi.meta_propose" }
+  | { v: 1; type: "rsi.meta_approve"; version: number; approved_by: string }
   | { v: 1; type: "mcp.status" }
   | { v: 1; type: "mcp.config_get" }
   | { v: 1; type: "mcp.config_set"; text: string }

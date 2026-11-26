@@ -20,6 +20,7 @@ from yoai.evolution.validation import CandidateValidator, CandidateValidation
 from yoai.evolution.promotion_r3 import R3Decision, R3Promoter
 from yoai.evolution.trial import TrialController, TrialRecord, TrialReport, TrialStore
 from yoai.evolution.rollback import RollbackDecision, RollbackMonitor
+from yoai.evolution.meta import MetaEvolution, MetaPolicy, MetaPolicyStore
 
 __all__ = [
     "EvolutionArchive", "ExpertNode", "ExpertSpec", "Checkpoint",
@@ -33,4 +34,5 @@ __all__ = [
     "R3Promoter", "R3Decision",
     "TrialController", "TrialRecord", "TrialReport", "TrialStore",
     "RollbackDecision", "RollbackMonitor",
+    "MetaEvolution", "MetaPolicy", "MetaPolicyStore",
 ]

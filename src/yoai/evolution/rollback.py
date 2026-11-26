@@ -51,11 +51,14 @@ class RollbackMonitor:
         evidence_store: EvidenceStore,
         feedback_store: FeedbackStore,
         report_store: EvolutionReportStore,
+        policy: Any = None,
     ) -> None:
+        from yoai.evolution.meta import MetaPolicy
         self.archive = archive
         self.store = evidence_store
         self.feedback = feedback_store
         self.reports = report_store
+        self.policy = policy or MetaPolicy(version=0)
 
     def check(self, node_id: str, *, window_days: int = 30) -> RollbackDecision:
         node = self.archive.get(node_id)
@@ -70,9 +73,9 @@ class RollbackMonitor:
                  if _in_window(e.created_at, window_days, now)]
         child = [e for e in items if e.expert_id == node_id]
         p_items = [e for e in items if e.expert_id == parent.id]
-        if len(child) < MIN_MONITOR_SAMPLES:
+        if len(child) < self.policy.min_validation_samples:
             return RollbackDecision(node_id, False,
-                                    f"active 样本不足 {MIN_MONITOR_SAMPLES}", {})
+                                    f"active 样本不足 {self.policy.min_validation_samples}", {})
 
         def rate(rows) -> tuple[int, float]:
             ok = sum(1 for e in rows
@@ -103,13 +106,13 @@ class RollbackMonitor:
             "child_tokens": int(c_tokens), "parent_tokens": int(p_tokens),
         }
         reasons = []
-        if c_ci[0] < p_ci[0] - CI_TOLERANCE:
-            reasons.append("成功率置信下界低于父节点超过 5pp")
-        if c_rework >= REWORK_ABSOLUTE and c_rework > p_rework + REWORK_DELTA:
-            reasons.append("返工率超过 25% 且高于父节点 5pp")
+        if c_ci[0] < p_ci[0] - self.policy.weak_gap:
+            reasons.append("成功率置信下界低于父节点超过策略阈值")
+        if c_rework >= self.policy.weak_rework and c_rework > p_rework + 0.05:
+            reasons.append("返工率超过策略阈值且高于父节点 5pp")
         if failures:
             reasons.append(f"verified_failure={failures}")
-        if p_tokens > 0 and c_tokens > p_tokens * COST_RATIO and c_rate <= p_rate + 0.02:
+        if p_tokens > 0 and c_tokens > p_tokens * self.policy.cost_ratio and c_rate <= p_rate + 0.02:
             reasons.append("成本超过父节点 20% 且无准确率收益")
 
         if not reasons:

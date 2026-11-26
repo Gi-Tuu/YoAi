@@ -144,6 +144,86 @@ def test_install_dependencies_uses_lock_and_venv(tmp_path, monkeypatch):
     assert (installed / "deps_install.log").exists()
 
 
+def _sign_with_key(key: Path, data: bytes) -> bytes:
+    path = tmp = None
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "data.bin"
+        path.write_bytes(data)
+        return subprocess.run(
+            ["openssl", "pkeyutl", "-sign", "-inkey", str(key), "-rawin", "-in", str(path)],
+            check=True, capture_output=True).stdout
+
+
+def test_remote_signature_chain_and_transparency(tmp_path, monkeypatch):
+    _skip_deps(monkeypatch)
+    if not shutil.which("openssl"):
+        pytest.skip("openssl not available")
+    root = tmp_path / "root.pem"
+    signer = tmp_path / "signer.pem"
+    root_pub = tmp_path / "root_pub.pem"
+    signer_pub = tmp_path / "signer_pub.pem"
+    for key in (root, signer):
+        subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(key)],
+                       check=True, capture_output=True)
+    subprocess.run(["openssl", "pkey", "-in", str(root), "-pubout", "-out", str(root_pub)],
+                   check=True, capture_output=True)
+    subprocess.run(["openssl", "pkey", "-in", str(signer), "-pubout", "-out", str(signer_pub)],
+                   check=True, capture_output=True)
+
+    signer_text = signer_pub.read_text(encoding="utf-8")
+    cert_sig = base64.b64encode(_sign_with_key(root, signer_text.encode("utf-8"))).decode("ascii")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("skill.json", json.dumps({
+            "name": "chain-demo", "prompt": "p", "tools": [],
+        }, ensure_ascii=False))
+    package = buf.getvalue()
+    package_sig = base64.b64encode(_sign_with_key(signer, package)).decode("ascii")
+    catalog = {"skills": [{
+        "name": "chain-demo", "version": "1.0", "url": "/pkg.zip",
+        "root_public_key": root_pub.read_text(encoding="utf-8"),
+        "signer_public_key": signer_text,
+        "signer_cert_signature": cert_sig,
+        "signature": package_sig,
+    }]}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            return
+
+        def do_GET(self):  # noqa: N802
+            if self.path == "/catalog.json":
+                body = json.dumps(catalog, ensure_ascii=False).encode("utf-8")
+                ctype = "application/json"
+            elif self.path == "/pkg.zip":
+                body, ctype = package, "application/zip"
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        store = SkillStore(tmp_path)
+        market = SkillMarket(tmp_path, store)
+        market.add_remote(f"{base}/catalog.json")
+        market.install("chain-demo")
+        ok, count = market.verify_ct()
+        assert ok and count == 1
+        assert market.status()["transparency"]["valid"] is True
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+
 def test_remote_signature_verification(tmp_path, monkeypatch):
     _skip_deps(monkeypatch)
     if not shutil_which("openssl"):

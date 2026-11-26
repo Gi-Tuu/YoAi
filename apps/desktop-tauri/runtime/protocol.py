@@ -228,6 +228,16 @@ def rsi_rolled_back(*, decision: dict[str, Any]) -> dict[str, Any]:
     return {"v": PROTOCOL_VERSION, "type": "rsi.rolled_back", "decision": decision}
 
 
+def rsi_meta_state(*, status: dict[str, Any]) -> dict[str, Any]:
+    """R4 元策略状态。"""
+    return {"v": PROTOCOL_VERSION, "type": "rsi.meta.state", "status": status}
+
+
+def rsi_meta_ack(*, message: str) -> dict[str, Any]:
+    """R4 元策略提案/批准结果。"""
+    return {"v": PROTOCOL_VERSION, "type": "rsi.meta.ack", "message": message}
+
+
 def rsi_promoted(*, decision: dict[str, Any]) -> dict[str, Any]:
     """R3.1：自动晋升结果；至多 candidate→probation 或 →retired。"""
     return {

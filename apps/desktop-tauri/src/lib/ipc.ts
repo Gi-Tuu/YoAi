@@ -222,6 +222,16 @@ export class IpcClient {
   async checkRollback(nodeId: string): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "rsi.rollback", node_id: nodeId });
   }
+  async getMetaPolicy(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.meta_status" });
+  }
+  async proposeMetaPolicy(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.meta_propose" });
+  }
+  async approveMetaPolicy(version: number, approvedBy = "本机所有者"): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.meta_approve",
+      version, approved_by: approvedBy });
+  }
   async getMcpStatus(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "mcp.status" });
   }

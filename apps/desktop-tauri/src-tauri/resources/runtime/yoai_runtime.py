@@ -65,9 +65,10 @@ from protocol import (  # noqa: E402  (自举后导入)
     attachment_ready, boundary_state, browser_opened, chat_msg, chat_state,
     encode, error, event, file_changed, file_content, file_tree, final,
     evolution_report, feedback_recorded, mcp_ack, mcp_config, mcp_state,
-    message_updated, permission_state, ready, rsi_promoted, rsi_rolled_back,
-    rsi_triggered, rsi_validated, share_exported, skill_ack, skill_config,
-    skill_market_state, skill_state, snapshot, status, trial_report, trial_state,
+    message_updated, permission_state, ready, rsi_meta_ack, rsi_meta_state,
+    rsi_promoted, rsi_rolled_back, rsi_triggered, rsi_validated, share_exported,
+    skill_ack, skill_config, skill_market_state, skill_state, snapshot, status,
+    trial_report, trial_state,
 )
 
 
@@ -121,6 +122,8 @@ class Runtime:
         self.mcp_manager: Any = None       # McpManager（标准 MCP 客户端）
         self.skill_store: Any = None       # SkillStore（技能包）
         self.skill_market: Any = None      # SkillMarket（本地技能市场）
+        self.meta_store: Any = None        # MetaPolicyStore（R4）
+        self.meta_evolution: Any = None    # MetaEvolution（R4）
         self.router: Any = None            # ExpertRouter（trial scope 覆盖）
         self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
         self._write_lock = asyncio.Lock()
@@ -148,9 +151,13 @@ class Runtime:
         self.file_changes = FileChangeStore(data_dir)
         self.actions = ConversationActions(data_dir)
         self.attachments = data_dir / "attachments"
-        from yoai.evolution import EvolutionReportStore, TrialStore
+        from yoai.evolution import (
+            EvolutionReportStore, MetaEvolution, MetaPolicyStore, TrialStore,
+        )
         from yoai.evidence import FeedbackStore
         self.evolution_reports = EvolutionReportStore(data_dir)
+        self.meta_store = MetaPolicyStore(data_dir)
+        self.meta_evolution = MetaEvolution(self.meta_store, self.evolution_reports)
         self.feedback_store = FeedbackStore(data_dir)
         self.trial_store = TrialStore(data_dir)
         from yoai.mcp import McpManager
@@ -796,9 +803,11 @@ class Runtime:
                             _data_dir() / "evolution" / "evolution.json")
                         active_node = active_archive.get(expert_id)
                         if active_node and active_node.lifecycle == "active":
+                            policy = self.meta_store.active() if self.meta_store else None
                             rollback = RollbackMonitor(
                                 active_archive, self.evidence_store,
-                                self.feedback_store, self.evolution_reports).check(expert_id)
+                                self.feedback_store, self.evolution_reports,
+                                policy=policy).check(expert_id)
                             if rollback.rolled_back:
                                 await self.send(rsi_rolled_back(decision=rollback.to_dict()))
                                 await self.send(self._archive_state())
@@ -1337,6 +1346,33 @@ class Runtime:
                 self.mcp_manager.refresh()
                 await self.send(mcp_ack(message="MCP 已重新加载"))
                 await self.send(mcp_state(status=self.mcp_manager.status()))
+        elif typ == "rsi.meta_status":
+            if self.meta_evolution is None:
+                await self.send(error("message", "元策略尚未初始化"))
+            else:
+                await self.send(rsi_meta_state(status=self.meta_evolution.status()))
+        elif typ == "rsi.meta_propose":
+            if self.meta_evolution is None:
+                await self.send(error("message", "元策略尚未初始化"))
+                return True
+            try:
+                result = self.meta_evolution.propose()
+                await self.send(rsi_meta_ack(
+                    message=result.get("reason", "元策略提案完成")))
+                await self.send(rsi_meta_state(status=self.meta_evolution.status()))
+            except (ValueError, OSError) as exc:
+                await self.send(error("message", str(exc)))
+        elif typ == "rsi.meta_approve":
+            if self.meta_evolution is None:
+                await self.send(error("message", "元策略尚未初始化"))
+                return True
+            try:
+                policy = self.meta_evolution.approve(
+                    int(cmd.get("version", 0)), str(cmd.get("approved_by", "")))
+                await self.send(rsi_meta_ack(message=f"元策略 v{policy.version} 已激活"))
+                await self.send(rsi_meta_state(status=self.meta_evolution.status()))
+            except (ValueError, OSError) as exc:
+                await self.send(error("message", str(exc)))
         elif typ == "rsi.rollback":
             try:
                 from yoai.evolution import EvolutionArchive, RollbackMonitor
@@ -1344,10 +1380,11 @@ class Runtime:
                         or self.evolution_reports is None:
                     raise RuntimeError("RSI 回滚存储尚未初始化")
                 archive = EvolutionArchive(_data_dir() / "evolution" / "evolution.json")
-                decision = RollbackMonitor(archive, self.evidence_store,
-                                           self.feedback_store,
-                                           self.evolution_reports).check(
-                    str(cmd.get("node_id", "")))
+                decision = RollbackMonitor(
+                    archive, self.evidence_store, self.feedback_store,
+                    self.evolution_reports,
+                    policy=self.meta_store.active() if self.meta_store else None,
+                ).check(str(cmd.get("node_id", "")))
                 await self.send(rsi_rolled_back(decision=decision.to_dict()))
                 await self.send(self._archive_state())
             except (ValueError, RuntimeError) as exc:
@@ -1363,7 +1400,8 @@ class Runtime:
             validator = CandidateValidator(archive, self.evidence_store, self.evolution_reports)
             validation = validator.validate(str(cmd.get("node_id", "")))
             await self.send(rsi_validated(validation=validation.to_dict()))
-            promoter = R3Promoter(archive, self.evidence_store, self.evolution_reports)
+            promoter = R3Promoter(archive, self.evidence_store, self.evolution_reports,
+                                  policy=self.meta_store.active() if self.meta_store else None)
             decision = promoter.apply(validation)
             await self.send(rsi_promoted(decision=decision.to_dict()))
             await self.send(self._archive_state())

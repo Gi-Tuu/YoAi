@@ -592,6 +592,11 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 .mcp-config textarea { width: 100%; min-height: 220px; resize: vertical; background: var(--bg); color: var(--ink);
   border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-note); }
 .mcp-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+.mcp-actions input { flex: 1; min-width: 120px; padding: 4px 8px; background: var(--bg); color: var(--ink); border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.meta-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.meta-grid > div { display: flex; flex-direction: column; padding: 6px 8px; border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.meta-grid span { font-size: var(--fs-cap); color: var(--dim); }
+.meta-grid b { font-family: var(--font-num); font-weight: 500; }
 .evo-trial-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--sp-1); }
 .evo-trial-actions .boundary-trigger { margin-top: 0; }
 

@@ -661,3 +661,32 @@ def test_skill_market_commands(tmp_path):
     run(rt.handle({"type": "skill.market_remove", "name": "m"}))
     state = next(m for m in out if m["type"] == "skill.market.state")
     assert state["status"]["items"] == []
+
+
+def test_rsi_meta_commands(tmp_path):
+    """R4：元策略状态/提案/批准必须通过协议层可调用。"""
+    from yoai.evolution import EvolutionReportStore, MetaEvolution, MetaPolicyStore
+
+    reports = EvolutionReportStore(tmp_path)
+    store = MetaPolicyStore(tmp_path)
+    rt = make_runtime(store_dir=tmp_path)
+    rt.meta_store = store
+    rt.meta_evolution = MetaEvolution(store, reports)
+    out = collect(rt)
+
+    run(rt.handle({"type": "rsi.meta_status"}))
+    state = next(m for m in out if m["type"] == "rsi.meta.state")
+    assert state["status"]["active"]["version"] == 1
+
+    for i in range(3):
+        reports.add({"id": f"v{i}", "kind": "rsi_validation", "verdict": "improved"})
+    out.clear()
+    run(rt.handle({"type": "rsi.meta_propose"}))
+    assert any(m["type"] == "rsi.meta.ack" for m in out)
+    state = next(m for m in out if m["type"] == "rsi.meta.state")
+    assert any(p["version"] == 2 for p in state["status"]["versions"])
+
+    out.clear()
+    run(rt.handle({"type": "rsi.meta_approve", "version": 2, "approved_by": "tester"}))
+    state = next(m for m in out if m["type"] == "rsi.meta.state")
+    assert state["status"]["active"]["version"] == 2

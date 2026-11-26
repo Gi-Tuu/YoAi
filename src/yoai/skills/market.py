@@ -32,6 +32,7 @@ class SkillMarket:
         self.root = Path(data_dir) / "skills"
         self.catalog_path = self.root / "market.json"
         self.sources_path = self.root / "market_sources.json"
+        self.ct_path = self.root / "transparency.jsonl"
         self.packages_dir = self.root / "market"
         self.store = store
         self._lock = threading.RLock()
@@ -77,6 +78,55 @@ class SkillMarket:
         self.sources_path.write_text(
             json.dumps({"sources": self._sources}, ensure_ascii=False, indent=2),
             encoding="utf-8")
+
+    # --- 透明日志（append-only hash chain）---
+    def _last_ct_hash(self) -> str:
+        if not self.ct_path.exists():
+            return "0" * 64
+        last = "0" * 64
+        try:
+            for line in self.ct_path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    item = json.loads(line)
+                    last = str(item.get("entry_hash", last))
+        except (OSError, ValueError):
+            return last
+        return last
+
+    def _append_ct(self, payload: dict[str, Any]) -> dict[str, Any]:
+        previous = self._last_ct_hash()
+        entry = {"previous_hash": previous,
+                 "at": datetime.now(timezone.utc).isoformat(), **payload}
+        canonical = json.dumps(entry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        entry["entry_hash"] = hashlib.sha256((previous + canonical).encode("utf-8")).hexdigest()
+        self.ct_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.ct_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return entry
+
+    def verify_ct(self) -> tuple[bool, int]:
+        if not self.ct_path.exists():
+            return True, 0
+        previous = "0" * 64
+        count = 0
+        try:
+            for line in self.ct_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                if item.get("previous_hash") != previous:
+                    return False, count
+                expected = item.pop("entry_hash", "")
+                canonical = json.dumps(item, ensure_ascii=False, sort_keys=True,
+                                       separators=(",", ":"))
+                digest = hashlib.sha256((previous + canonical).encode("utf-8")).hexdigest()
+                if digest != expected:
+                    return False, count
+                previous = expected
+                count += 1
+        except (OSError, ValueError):
+            return False, count
+        return True, count
 
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -176,6 +226,10 @@ class SkillMarket:
                     "public_key": str(item.get("public_key", "")),
                     "public_key_url": self._abs_url(
                         str(item.get("public_key_url", "")), source),
+                    "root_public_key": str(item.get("root_public_key", "")),
+                    "signer_public_key": str(item.get("signer_public_key", "")),
+                    "signer_cert_signature": str(item.get("signer_cert_signature", "")),
+                    "signer_expires_at": str(item.get("signer_expires_at", "")),
                     "requirements": [str(r) for r in (item.get("requirements") or [])],
                     "lockfile_url": self._abs_url(str(item.get("lockfile_url", "")), source),
                     "lockfile": str(item.get("lockfile", "")),
@@ -220,18 +274,41 @@ class SkillMarket:
         if not url.startswith(("http://", "https://")):
             raise ValueError("远程技能包 URL 非法")
         data = self._fetch_bytes(url)
+        digest = hashlib.sha256(data).hexdigest()
         expected = str(entry.get("sha256", "")).strip().lower()
-        if expected and hashlib.sha256(data).hexdigest() != expected:
+        if expected and digest != expected:
             raise ValueError("远程技能包 sha256 校验失败")
-        signature = str(entry.get("signature", "")).strip()
-        if signature:
+
+        root_key = str(entry.get("root_public_key", ""))
+        signer_key = str(entry.get("signer_public_key", ""))
+        cert_sig = str(entry.get("signer_cert_signature", "")).strip()
+        chained = bool(root_key and signer_key and cert_sig)
+        if chained:
+            self._verify_ed25519(signer_key.encode("utf-8"), cert_sig, root_key)
+            expires = str(entry.get("signer_expires_at", "")).strip()
+            if expires and datetime.fromisoformat(
+                    expires.replace("Z", "+00:00")) < datetime.now(timezone.utc):
+                raise ValueError("签名者证书已过期")
+            signer_pub = signer_key
+        else:
             public_key = str(entry.get("public_key", "")).strip()
             key_url = str(entry.get("public_key_url", "")).strip()
             if not public_key and key_url:
                 public_key = self._fetch_bytes(key_url).decode("utf-8", "replace")
-            if not public_key:
-                raise ValueError("catalog 提供签名但缺少 public_key")
-            self._verify_ed25519(data, signature, public_key)
+            signer_pub = public_key
+
+        signature = str(entry.get("signature", "")).strip()
+        if signature and signer_pub:
+            self._verify_ed25519(data, signature, signer_pub)
+        elif chained:
+            raise ValueError("签名链完整但缺少包签名")
+        if signature or chained:
+            self._append_ct({
+                "name": str(entry.get("name", "")), "sha256": digest,
+                "catalog_url": str(entry.get("catalog_url", "")),
+                "signer_fp": hashlib.sha256(signer_pub.encode("utf-8")).hexdigest()[:16],
+                "chain": chained,
+            })
         dest = Path(tmp.name) / "package"
         dest.mkdir(parents=True, exist_ok=True)
         self._extract_zip(data, dest)
@@ -485,7 +562,10 @@ class SkillMarket:
         items = self.list()
         for item in items:
             item.setdefault("source_type", "local")
+        ct_ok, ct_count = self.verify_ct()
         return {"catalog": str(self.catalog_path),
                 "sources": self.list_sources(),
                 "packages_dir": str(self.packages_dir),
+                "transparency": {"path": str(self.ct_path),
+                                 "entries": ct_count, "valid": ct_ok},
                 "items": items}

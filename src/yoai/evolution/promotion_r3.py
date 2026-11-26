@@ -42,10 +42,13 @@ class R3Promoter:
         archive: EvolutionArchive,
         evidence_store: EvidenceStore,
         report_store: EvolutionReportStore,
+        policy: Any = None,
     ) -> None:
+        from yoai.evolution.meta import MetaPolicy
         self.archive = archive
         self.store = evidence_store
         self.reports = report_store
+        self.policy = policy or MetaPolicy(version=0)
 
     def apply(self, validation: CandidateValidation) -> R3Decision:
         node = self.archive.get(validation.node_id)
@@ -94,14 +97,16 @@ class R3Promoter:
             if node_total == 0 and parent_total == 0:
                 continue
             # child 未参与的能力标签不构成该候选的验证边界（共享 parent 会带入其他标签）
-            if node_total > 0 and node_total < MIN_VALIDATION_SAMPLES:
-                return f"child 边界样本不足 {MIN_VALIDATION_SAMPLES}"
-            if parent_total > 0 and parent_total < MIN_VALIDATION_SAMPLES:
-                return f"parent 边界样本不足 {MIN_VALIDATION_SAMPLES}"
+            minimum = self.policy.min_validation_samples
+            if node_total > 0 and node_total < minimum:
+                return f"child 边界样本不足 {minimum}"
+            if parent_total > 0 and parent_total < minimum:
+                return f"parent 边界样本不足 {minimum}"
         ratio = self._cost_ratio(validation.node_id, validation.parent_id)
-        if ratio is None or ratio > MAX_COST_RATIO:
+        limit = self.policy.cost_ratio
+        if ratio is None or ratio > limit:
             shown = "无法计算" if ratio is None else f"{ratio:.2f}"
-            return f"成本守卫未通过：token 比 {shown}，上限 {MAX_COST_RATIO}"
+            return f"成本守卫未通过：token 比 {shown}，上限 {limit}"
         return ""
 
     def _cost_ratio(self, node_id: str, parent_id: str) -> float | None:
