@@ -187,6 +187,41 @@ export class IpcClient {
   async shareExport(path: string, content: string, count: number): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "share.export", path, content, count });
   }
+  /** R0：只记录用户动作，不触发进化。 */
+  async recordFeedback(kind: string, task: string, runId: string, note = ""): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "feedback.record", kind, task,
+      run_id: runId, note });
+  }
+  async getBoundary(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "boundary.get" });
+  }
+  async triggerRsi(tags: string[] = []): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.trigger", tags });
+  }
+  async validateCandidate(nodeId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.validate", node_id: nodeId });
+  }
+  async startTrial(nodeId: string, scope: string, maxN = 20): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.trial_start",
+      node_id: nodeId, scope, max_n: maxN });
+  }
+  async stopTrial(trialId: string, reason = ""): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.trial_stop",
+      trial_id: trialId, reason });
+  }
+  async trialReport(trialId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.trial_report", trial_id: trialId });
+  }
+  async approveActive(trialId: string, approvedBy: string, reason = ""): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.promote_active",
+      trial_id: trialId, approved_by: approvedBy, reason });
+  }
+  async rejectTrial(trialId: string, reason = ""): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.reject", trial_id: trialId, reason });
+  }
+  async checkRollback(nodeId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "rsi.rollback", node_id: nodeId });
+  }
 
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });

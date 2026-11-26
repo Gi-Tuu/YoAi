@@ -28,12 +28,14 @@ describe("消息动作条", () => {
     expect(onRegenerate).toHaveBeenCalledTimes(1);
   });
 
-  it("复制与分享两者都有", () => {
-    const onCopy = vi.fn(); const onShare = vi.fn();
-    render(<MessageActions role="user" onCopy={onCopy} onShare={onShare} />);
+  it("复制与分享两者都有，并上报反馈信号", () => {
+    const onCopy = vi.fn(); const onShare = vi.fn(); const onFeedback = vi.fn();
+    render(<MessageActions role="user" onCopy={onCopy} onShare={onShare}
+      onFeedback={onFeedback} />);
     fireEvent.click(screen.getByText("复制"));
     fireEvent.click(screen.getByText("分享"));
     expect(onCopy).toHaveBeenCalledTimes(1);
     expect(onShare).toHaveBeenCalledTimes(1);
+    expect(onFeedback.mock.calls.map((c) => c[0])).toEqual(["copy", "share"]);
   });
 });

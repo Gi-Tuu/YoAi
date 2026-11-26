@@ -440,3 +440,132 @@ def test_archive_state_includes_evolution_reports(tmp_path, monkeypatch):
     node = next(n for n in state["nodes"] if n["id"] == root.id)
     assert node["reports"][0]["id"] == "rep1"
     assert node["evidence"] == []
+
+
+def test_feedback_record_binds_evidence(tmp_path, monkeypatch):
+    """R0：用户动作写独立反馈信号，绑定对应执行证据，不影响进化档案。"""
+    from yoai.evidence import ExecutionEvidence, EvidenceStore, FeedbackStore
+
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    store = EvidenceStore(tmp_path / "evidence" / "evidence.json")
+    evidence = ExecutionEvidence.create(
+        session_id="s1", task="旧问题", task_fingerprint="fp1",
+        fingerprint_tags=("temporal",), status="ok")
+    store.add(evidence)
+    rt = make_runtime(store_dir=tmp_path)
+    rt.evidence_store = store
+    rt.feedback_store = FeedbackStore(tmp_path)
+    rt.run_evidence["r1"] = evidence.id
+
+    out = collect(rt)
+    run(rt.handle({"type": "feedback.record", "kind": "regenerate",
+                   "task": "旧问题", "run_id": "r1"}))
+    recorded = next(m for m in out if m["type"] == "feedback.recorded")
+    assert recorded["signal"]["evidence_id"] == evidence.id
+    assert recorded["signal"]["polarity"] == -1
+    assert rt.feedback_store.count() == 1
+    assert not any(m["type"] == "evolution.report" for m in out)
+
+
+def test_boundary_get_pushes_state(tmp_path, monkeypatch):
+    """R1：看板请求必须回 boundary.state，缺存储也要给空报告而不是崩溃。"""
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    rt = make_runtime(store_dir=tmp_path)
+    out = collect(rt)
+    run(rt.handle({"type": "boundary.get"}))
+    state = next(m for m in out if m["type"] == "boundary.state")
+    assert state["report"]["rows"] == []
+    assert state["report"]["total"] == 0
+
+
+def test_rsi_trigger_command_reports_shadow_decisions(tmp_path, monkeypatch):
+    """R2.1：空数据也必须回 rsi.triggered 并刷新看板，不崩溃。"""
+    from yoai.evidence import EvidenceStore, FeedbackStore
+    from yoai.evolution import EvolutionReportStore
+
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    rt = make_runtime(store_dir=tmp_path)
+    rt.evidence_store = EvidenceStore(tmp_path / "evidence.json")
+    rt.feedback_store = FeedbackStore(tmp_path)
+    rt.evolution_reports = EvolutionReportStore(tmp_path)
+    out = collect(rt)
+    run(rt.handle({"type": "rsi.trigger", "tags": []}))
+    triggered = next(m for m in out if m["type"] == "rsi.triggered")
+    assert triggered["decisions"] == []
+    assert any(m["type"] == "archive.state" for m in out)
+    assert any(m["type"] == "boundary.state" for m in out)
+
+
+def test_rsi_validate_command_reports_result(tmp_path, monkeypatch):
+    """R2.2：验证命令必须回结论并刷新档案，本阶段不改生命周期。"""
+    from yoai.evidence import EvidenceStore
+    from yoai.evolution import EvolutionReportStore
+
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    rt = make_runtime(store_dir=tmp_path)
+    rt.evidence_store = EvidenceStore(tmp_path / "evidence.json")
+    rt.evolution_reports = EvolutionReportStore(tmp_path)
+    out = collect(rt)
+    run(rt.handle({"type": "rsi.validate", "node_id": "missing"}))
+    validated = next(m for m in out if m["type"] == "rsi.validated")
+    assert validated["validation"]["verdict"] == "insufficient"
+    assert validated["validation"]["promoted"] is False
+    promoted = next(m for m in out if m["type"] == "rsi.promoted")
+    assert promoted["decision"]["verdict"] == "insufficient"
+    assert promoted["decision"]["changed"] is False
+    assert any(m["type"] == "archive.state" for m in out)
+
+
+def test_rsi_trial_commands(tmp_path, monkeypatch):
+    """R3.2：trial 命令必须回状态并刷新档案，证据不足时拒绝批准。"""
+    from yoai.evidence import EvidenceStore, FeedbackStore
+    from yoai.evolution import (
+        EvolutionArchive, EvolutionReportStore, ExpertSpec, TrialStore,
+    )
+
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    rt = make_runtime(store_dir=tmp_path)
+    rt.evidence_store = EvidenceStore(tmp_path / "evidence.json")
+    rt.feedback_store = FeedbackStore(tmp_path)
+    rt.evolution_reports = EvolutionReportStore(tmp_path)
+    rt.trial_store = TrialStore(tmp_path)
+    archive = EvolutionArchive(tmp_path / "evolution" / "evolution.json")
+    root = archive.create_root("root", ExpertSpec())
+    child = archive.create_child(root.id, "child",
+                                 ExpertSpec(), diff={"dimension": "tools", "tag": "temporal"})
+    archive.transition(child.id, "probation")
+
+    out = collect(rt)
+    run(rt.handle({"type": "rsi.trial_start", "node_id": child.id,
+                   "scope": "tag:temporal", "max_n": 20}))
+    started = next(m for m in out if m["type"] == "trial.state")
+    assert started["trial"]["node_id"] == child.id
+    assert started["trial"]["status"] == "running"
+
+    out.clear()
+    run(rt.handle({"type": "rsi.trial_report", "trial_id": started["trial"]["id"]}))
+    report = next(m for m in out if m["type"] == "trial.report")
+    assert report["report"]["passed"] is False
+
+    out.clear()
+    run(rt.handle({"type": "rsi.promote_active", "trial_id": started["trial"]["id"],
+                   "approved_by": "tester"}))
+    assert any(m["type"] == "error" and "硬门槛" in m["message"] for m in out)
+    assert archive.get(child.id).lifecycle == "probation"
+
+
+def test_rsi_rollback_command_reports_decision(tmp_path, monkeypatch):
+    """R3.3：手动回滚检查必须回结论并刷新档案。"""
+    from yoai.evidence import EvidenceStore, FeedbackStore
+    from yoai.evolution import EvolutionReportStore
+
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    rt = make_runtime(store_dir=tmp_path)
+    rt.evidence_store = EvidenceStore(tmp_path / "evidence.json")
+    rt.feedback_store = FeedbackStore(tmp_path)
+    rt.evolution_reports = EvolutionReportStore(tmp_path)
+    out = collect(rt)
+    run(rt.handle({"type": "rsi.rollback", "node_id": "missing"}))
+    rolled = next(m for m in out if m["type"] == "rsi.rolled_back")
+    assert rolled["decision"]["rolled_back"] is False
+    assert any(m["type"] == "archive.state" for m in out)

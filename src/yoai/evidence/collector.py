@@ -107,6 +107,8 @@ class ExecutionEvidenceCollector:
         parent_id: str | None,
         usage_override: dict[str, int] | None = None,
         route_decision: dict[str, Any] | None = None,
+        trial_id: str = "",
+        trial_role: str = "",
     ) -> ExecutionEvidence:
         """收尾产出不可变证据（事件流快照）。
 
@@ -134,5 +136,6 @@ class ExecutionEvidenceCollector:
             tool_calls=a.tool_calls,
             verification=a.verification,
             route_decision=route_decision,
+            trial_id=trial_id, trial_role=trial_role,
             final_text_preview=a.final_text,
         )

@@ -15,7 +15,8 @@ from typing import Any
 # 样本类别：进化样本 vs 验证样本必须隔离（设计单 §4）
 SAMPLE_EVOLUTION = "evolution"
 SAMPLE_VALIDATION = "validation"
-SAMPLE_CLASSES = (SAMPLE_EVOLUTION, SAMPLE_VALIDATION)
+SAMPLE_TRIAL = "trial"
+SAMPLE_CLASSES = (SAMPLE_EVOLUTION, SAMPLE_VALIDATION, SAMPLE_TRIAL)
 
 # 三分归因
 ATTRIBUTION_CAPABILITY = "capability"       # 专家能力不足
@@ -49,6 +50,8 @@ class ExecutionEvidence:
     route_decision: dict[str, Any] | None       # M1 真实路由决策快照（expert_id 来源）
     final_text_preview: str
     created_at: str
+    trial_id: str = ""                          # R3.2 试用批次
+    trial_role: str = ""                        # child / parent（同题成对）
 
     @classmethod
     def create(cls, **kwargs: Any) -> ExecutionEvidence:
@@ -73,6 +76,8 @@ class ExecutionEvidence:
             verification=kwargs.pop("verification", None),
             route_decision=kwargs.pop("route_decision", None),
             final_text_preview=str(kwargs.pop("final_text_preview", ""))[:500],
+            trial_id=str(kwargs.pop("trial_id", "")),
+            trial_role=str(kwargs.pop("trial_role", "")),
             created_at=kwargs.pop("created_at", datetime.now(timezone.utc).isoformat()),
         )
 
@@ -92,12 +97,58 @@ class ExecutionEvidence:
             "verification": self.verification,
             "route_decision": self.route_decision,
             "final_text_preview": self.final_text_preview,
+            "trial_id": self.trial_id, "trial_role": self.trial_role,
             "created_at": self.created_at,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ExecutionEvidence:
         return cls.create(**d)
+
+
+@dataclass
+class FeedbackSignal:
+    """用户对一次执行结果的显式反馈（R0：只采集，不触发进化）。
+
+    负向：retract / edit / regenerate；正向：copy / share；中性：continue。
+    绑定 evidence_id 与能力标签，供后续能力边界统计使用。
+    """
+
+    id: str
+    evidence_id: str
+    run_id: str
+    session_id: str
+    kind: str
+    polarity: int                      # -1 负向 / 0 中性 / +1 正向
+    task_fingerprint: str = ""
+    fingerprint_tags: tuple[str, ...] = ()
+    note: str = ""
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "evidence_id": self.evidence_id,
+            "run_id": self.run_id, "session_id": self.session_id,
+            "kind": self.kind, "polarity": int(self.polarity),
+            "task_fingerprint": self.task_fingerprint,
+            "fingerprint_tags": list(self.fingerprint_tags),
+            "note": self.note, "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "FeedbackSignal":
+        return cls(
+            id=str(d.get("id", uuid.uuid4().hex[:12])),
+            evidence_id=str(d.get("evidence_id", "")),
+            run_id=str(d.get("run_id", "")),
+            session_id=str(d.get("session_id", "")),
+            kind=str(d.get("kind", "")),
+            polarity=int(d.get("polarity", 0)),
+            task_fingerprint=str(d.get("task_fingerprint", "")),
+            fingerprint_tags=tuple(d.get("fingerprint_tags", ())),
+            note=str(d.get("note", "")),
+            created_at=str(d.get("created_at", "")),
+        )
 
 
 @dataclass

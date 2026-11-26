@@ -69,10 +69,25 @@ class ExpertRouter:
         self.tag_lexicon = tag_lexicon
         self.mode = mode
         self._last_decision: RouteDecision | None = None
+        # R3.2 试用覆盖：(node_id, scope_type, scope_value)；目前支持 tag:<标签>
+        self.trial_override: tuple[str, str, str] | None = None
 
     @property
     def last_decision(self) -> RouteDecision | None:
         return self._last_decision
+
+    def set_trial(self, node_id: str, scope: str) -> None:
+        """R3.2：设置试用覆盖。当前支持 tag:<能力标签>。"""
+        if not scope.startswith("tag:"):
+            raise ValueError("路由试用仅支持 tag:<能力标签>")
+        self.trial_override = (node_id, "tag", scope.split(":", 1)[1])
+
+    def clear_trial(self) -> None:
+        self.trial_override = None
+
+    @property
+    def trial_node_id(self) -> str:
+        return self.trial_override[0] if self.trial_override else ""
 
     def route(self, task: str) -> RouteDecision:
         """为任务选择一个 active 专家；无可靠候选回退根节点。
@@ -80,6 +95,20 @@ class ExpertRouter:
         根节点也没有时返回 selected_id=None（明确失败，不假装选中）。
         """
         fp = fingerprint(task, tag_lexicon=self.tag_lexicon)
+
+        if self.trial_override:
+            node_id, scope_type, scope_value = self.trial_override
+            node = self.archive.get(node_id)
+            if node is None or node.lifecycle != "probation":
+                self.clear_trial()
+            elif scope_type == "tag" and scope_value in fp.tags:
+                decision = RouteDecision(
+                    task=task, fingerprint=fp, selected_id=node.id,
+                    selected_name=node.name, scores={},
+                    reason=f"R3.2 试用覆盖：命中标签 {scope_value}", fallback=False,
+                )
+                self._last_decision = decision
+                return decision
 
         if self.mode == "max_performance":
             raise NotImplementedError(
@@ -158,3 +187,25 @@ class ExpertRouter:
             scores.keys(),
             key=lambda k: (-scores[k], k),
         )[0]
+
+
+class ForcedExpertRouter(ExpertRouter):
+    """R3.3：后台影子运行强制指定节点（parent shadow）。不参与正常 UI 路由。"""
+
+    def __init__(self, archive: EvolutionArchive, node_id: str,
+                 tag_lexicon=None) -> None:
+        super().__init__(archive, tag_lexicon=tag_lexicon)
+        self.node_id = node_id
+
+    def route(self, task: str) -> RouteDecision:
+        node = self.archive.get(self.node_id)
+        fp = fingerprint(task, tag_lexicon=self.tag_lexicon)
+        decision = RouteDecision(
+            task=task, fingerprint=fp,
+            selected_id=node.id if node else None,
+            selected_name=node.name if node else "",
+            scores={}, reason="R3.3 parent shadow（后台对照，不展示）",
+            fallback=False,
+        )
+        self._last_decision = decision
+        return decision

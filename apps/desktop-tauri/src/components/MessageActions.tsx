@@ -8,25 +8,29 @@ interface Props {
   onEdit?: () => void;
   onRetract?: () => void;
   onRegenerate?: () => void;
+  onFeedback?: (kind: string) => void;
 }
 
 export function MessageActions({ role, busy, onCopy, onShare,
-  onEdit, onRetract, onRegenerate }: Props) {
+  onEdit, onRetract, onRegenerate, onFeedback }: Props) {
+  const act = (kind: string, fn: () => void) => () => {
+    onFeedback?.(kind);
+    fn();
+  };
   return (
     <div className="message-actions" aria-label="消息操作">
-      <button type="button" title="复制这条消息" onClick={onCopy}>复制</button>
+      <button type="button" title="复制这条消息" onClick={act("copy", onCopy)}>复制</button>
       {role === "user" && onEdit && (
-        <button type="button" title="编辑这条提问并从这里重发" onClick={onEdit}>编辑</button>
+        <button type="button" title="编辑这条提问并从这里重发" onClick={act("edit", onEdit)}>编辑</button>
       )}
       {role === "user" && onRetract && (
-        <button type="button" title="撤回这条提问及其回答" onClick={onRetract}>撤回</button>
+        <button type="button" title="撤回这条提问及其回答" onClick={act("retract", onRetract)}>撤回</button>
       )}
       {role === "assistant" && onRegenerate && (
-        <button type="button" title="重新生成这条回答" disabled={busy} onClick={onRegenerate}>
-          重新生成
-        </button>
+        <button type="button" title="重新生成这条回答" disabled={busy}
+                onClick={act("regenerate", onRegenerate)}>重新生成</button>
       )}
-      <button type="button" title="导出这条消息" onClick={onShare}>分享</button>
+      <button type="button" title="导出这条消息" onClick={act("share", onShare)}>分享</button>
     </div>
   );
 }

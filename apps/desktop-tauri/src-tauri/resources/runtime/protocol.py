@@ -206,3 +206,58 @@ def evolution_report(*, report: dict[str, Any]) -> dict[str, Any]:
     return {
         "v": PROTOCOL_VERSION, "type": "evolution.report", "report": report,
     }
+
+
+def trial_state(*, record: dict[str, Any]) -> dict[str, Any]:
+    """R3.2：试用批次状态。"""
+    return {"v": PROTOCOL_VERSION, "type": "trial.state", "trial": record}
+
+
+def trial_report(*, report: dict[str, Any]) -> dict[str, Any]:
+    """R3.2：试用硬门槛报告。"""
+    return {"v": PROTOCOL_VERSION, "type": "trial.report", "report": report}
+
+
+def approval_recorded(*, decision: dict[str, Any]) -> dict[str, Any]:
+    """R3.2：人工批准/拒绝记录。"""
+    return {"v": PROTOCOL_VERSION, "type": "approval.recorded", "decision": decision}
+
+
+def rsi_rolled_back(*, decision: dict[str, Any]) -> dict[str, Any]:
+    """R3.3：active 节点回归，已退役并回退父节点。"""
+    return {"v": PROTOCOL_VERSION, "type": "rsi.rolled_back", "decision": decision}
+
+
+def rsi_promoted(*, decision: dict[str, Any]) -> dict[str, Any]:
+    """R3.1：自动晋升结果；至多 candidate→probation 或 →retired。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "rsi.promoted", "decision": decision,
+    }
+
+
+def rsi_validated(*, validation: dict[str, Any]) -> dict[str, Any]:
+    """R2.2：候选隔离验证结论；本阶段不改变生命周期。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "rsi.validated", "validation": validation,
+    }
+
+
+def rsi_triggered(*, decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    """RSI R2.1：shadow 触发结果；候选不进入路由、不晋升。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "rsi.triggered", "decisions": decisions,
+    }
+
+
+def boundary_state(*, report: dict[str, Any]) -> dict[str, Any]:
+    """能力边界看板：按标签聚合的成功率、返工率与 Wilson 区间。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "boundary.state", "report": report,
+    }
+
+
+def feedback_recorded(*, signal: dict[str, Any]) -> dict[str, Any]:
+    """用户动作已作为反馈信号落盘（R0：只采集，不触发进化）。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "feedback.recorded", "signal": signal,
+    }

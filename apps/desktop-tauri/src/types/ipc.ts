@@ -268,6 +268,105 @@ export interface ShareExportedMsg extends BaseMsg {
   count: number;
 }
 
+export interface BoundaryRow {
+  tag: string;
+  total: number;
+  success: number;
+  success_rate: number;
+  success_ci: number[];
+  rework: number;
+  rework_rate: number;
+  avg_tokens: number;
+  positive: number;
+  baseline_gap: number;
+  status: "insufficient" | "weak" | "watch" | "healthy";
+  sample_enough: boolean;
+}
+
+export interface TrialRecordMsgData {
+  id: string; node_id: string; parent_id: string; primary_tag: string;
+  scope: string; max_n: number; status: string; created_at: string;
+  expires_at: string; decision: string; decided_by: string;
+}
+
+export interface TrialReportMsgData {
+  trial_id: string; node_id: string; parent_id: string; passed: boolean;
+  reason: string; child_samples: number; parent_samples: number;
+  child_rate: number; parent_rate: number; child_ci: number[]; parent_ci: number[];
+  child_rework: number; parent_rework: number; child_tokens: number;
+  parent_tokens: number; verified_failures: number;
+}
+
+export interface TrialStateMsg extends BaseMsg {
+  type: "trial.state";
+  trial: TrialRecordMsgData;
+}
+
+export interface TrialReportMsg extends BaseMsg {
+  type: "trial.report";
+  report: TrialReportMsgData;
+}
+
+export interface ApprovalRecordedMsg extends BaseMsg {
+  type: "approval.recorded";
+  decision: {
+    node_id: string; from_state: string; to_state: string;
+    changed: boolean; reason: string; verdict: string;
+  };
+}
+
+export interface RsiRolledBackMsg extends BaseMsg {
+  type: "rsi.rolled_back";
+  decision: {
+    node_id: string; rolled_back: boolean; reason: string; detail: Record<string, unknown>;
+  };
+}
+
+export interface RsiPromotedMsg extends BaseMsg {
+  type: "rsi.promoted";
+  decision: {
+    node_id: string; from_state: string; to_state: string;
+    changed: boolean; reason: string; verdict: string;
+  };
+}
+
+export interface RsiValidatedMsg extends BaseMsg {
+  type: "rsi.validated";
+  validation: {
+    node_id: string; parent_id: string; verdict: string; note: string;
+    total_samples: number; child_validation: number; parent_validation: number;
+    promoted: boolean;
+    report: Record<string, unknown>;
+  };
+}
+
+export interface RsiTriggeredMsg extends BaseMsg {
+  type: "rsi.triggered";
+  decisions: Array<{ tag: string; created: boolean; reason: string; node_id: string }>;
+}
+
+export interface BoundaryStateMsg extends BaseMsg {
+  type: "boundary.state";
+  report: {
+    window_days: number;
+    total: number;
+    success: number;
+    success_rate: number;
+    rework: number;
+    rework_rate: number;
+    rows: BoundaryRow[];
+  };
+}
+
+export interface FeedbackRecordedMsg extends BaseMsg {
+  type: "feedback.recorded";
+  signal: {
+    id: string; evidence_id: string; run_id: string; session_id: string;
+    kind: string; polarity: number; task_fingerprint: string;
+    fingerprint_tags: string[]; note: string; created_at: string;
+  };
+}
+
 /** 右侧工具面板：系统浏览器兜底已触发。 */
 export interface BrowserOpenedMsg extends BaseMsg {
   type: "browser.opened";
@@ -301,7 +400,9 @@ export type RuntimeMsg =
   | ReadyMsg | StatusMsg | EventMsg | FinalMsg | ApprovalRequestMsg | ErrorMsg
   | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg | PermissionStateMsg
   | FileChangedMsg | BrowserOpenedMsg | FileTreeMsg | FileContentMsg
-  | AttachmentReadyMsg | MessageUpdatedMsg | ShareExportedMsg;
+  | AttachmentReadyMsg | MessageUpdatedMsg | ShareExportedMsg | FeedbackRecordedMsg
+  | BoundaryStateMsg | RsiTriggeredMsg | RsiValidatedMsg | RsiPromotedMsg
+  | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -336,6 +437,16 @@ export type Command =
   | { v: 1; type: "message.edit"; index: number; input: string; task_id: string; run_id: string }
   | { v: 1; type: "task.regenerate"; index: number; input: string; task_id: string; run_id: string }
   | { v: 1; type: "share.export"; path: string; content: string; count: number }
+  | { v: 1; type: "feedback.record"; kind: string; task: string; run_id: string; note?: string }
+  | { v: 1; type: "boundary.get" }
+  | { v: 1; type: "rsi.trigger"; tags?: string[] }
+  | { v: 1; type: "rsi.validate"; node_id: string }
+  | { v: 1; type: "rsi.trial_start"; node_id: string; scope: string; max_n?: number }
+  | { v: 1; type: "rsi.trial_stop"; trial_id: string; reason?: string }
+  | { v: 1; type: "rsi.trial_report"; trial_id: string }
+  | { v: 1; type: "rsi.promote_active"; trial_id: string; approved_by: string; reason?: string }
+  | { v: 1; type: "rsi.reject"; trial_id: string; reason?: string }
+  | { v: 1; type: "rsi.rollback"; node_id: string }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

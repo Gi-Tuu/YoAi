@@ -189,6 +189,71 @@
 `share.exported{path,count}`；`snapshot.history[]` 追加 `idx`（原始历史序号）供动作定位。
 错误阶段新增 `message`/`share`。撤回/编辑采用软删除+分支，原始 Core 历史不物理删除。
 
+### v1 追加（RSI R0 用户反馈信号）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `feedback.record` | `kind`,`task`,`run_id`,`note?` | 记录复制/分享/编辑/撤回/重新生成动作，绑定最近执行证据，写 `evidence/feedback.jsonl`，回 `feedback.recorded` |
+
+`kind` 极性：负向=`retract`/`edit`/`regenerate`，正向=`copy`/`share`，中性=`continue`。
+**R0 只采集，不触发进化、不写进化档案。**
+
+### v1 追加（RSI R1 能力边界看板）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `boundary.get` | — | 聚合近 30 天执行证据与 R0 反馈信号，回 `boundary.state` |
+
+`boundary.state.report` 含总览（样本数/成功率/返工率）与按能力标签的 `rows[]`：
+每行带成功率、Wilson 区间、返工率、正向信号、相对基线、状态分级。
+**R1 只统计展示，不触发进化、不写进化档案。**
+
+### v1 追加（RSI R2.1 shadow 触发）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `rsi.trigger` | `tags?` | 对指定（或全部）薄弱能力边界运行触发引擎；只生成 candidate 节点，回 `rsi.triggered` 并刷新档案/看板 |
+
+`rsi.triggered.decisions[]` 含 `tag/created/reason/node_id`。触发条件：样本 ≥20、
+边界 weak、能力/路由归因 ≥60%、环境归因 <20%、7 天冷却内无同方向候选。
+**候选生命周期保持 candidate，不进路由、不晋升。**
+
+### v1 追加（RSI R2.2 隔离验证）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `rsi.validate` | `node_id` | 对 candidate 节点用 held-out validation 证据跑 child/parent 成对验证，回 `rsi.validated` 并刷新档案 |
+
+`rsi.validated.validation` 带 `verdict`、`note`、样本量、`report`（Wilson 区间）与 `promoted=false`。
+**R2.2 只判定不晋升**，生命周期不变；晋升属于 R3。
+
+### v1 追加（R3.1 受控晋升）
+
+`rsi.validate` 完成后 runtime 自动应用晋升规则，并追加推送 `rsi.promoted`，
+`decision` 含 `node_id/from_state/to_state/changed/reason/verdict`。
+**只可能 candidate→probation 或 candidate→retired；probation→active 属 R3.2，需 trial + 人工批准。**
+
+### v1 追加（R3.2 试用与批准）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `rsi.trial_start` | `node_id`,`scope`,`max_n?` | 启动 tag scope 试用，返回 `trial.state`；路由临时覆盖到 probation 节点 |
+| `rsi.trial_stop` | `trial_id`,`reason?` | 停止试用并清除路由覆盖 |
+| `rsi.trial_report` | `trial_id` | 返回 `trial.report`（child/parent 样本、成功率、返工、成本、硬门槛） |
+| `rsi.promote_active` | `trial_id`,`approved_by`,`reason?` | 人工批准后 probation→active，写 `approval.recorded` |
+| `rsi.reject` | `trial_id`,`reason?` | 拒绝并 retired |
+
+新增 `trial` 样本类别，与 evolution/validation 隔离；`ExecutionEvidence` 带 `trial_id`/`trial_role`。
+
+### v1 追加（R3.3 parent shadow 与回滚）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `rsi.rollback` | `node_id` | 手动检查 active 节点近 30 天回归，命中则 retired 并回退父节点，回 `rsi.rolled_back` |
+
+真实任务命中 running trial 时，主证据标 `trial/child`，后台用隔离 agent 跑 parent 并落 `trial/parent`；
+两侧证据带同一 `trial_id`，不推 UI 事件。active 节点每次真实任务后自动跑回归监控。
+
 ### 行为约定
 
 1. `task` 事件序列规则不变；`snapshot` 与 run 事件流相互独立。

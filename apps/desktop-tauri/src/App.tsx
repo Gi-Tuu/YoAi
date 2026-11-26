@@ -17,6 +17,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControls } from "./components/WindowControls";
 import { CommsPage } from "./components/CommsPage";
 import { GalaxyPage } from "./components/GalaxyPage";
+import { BoundaryPage } from "./components/BoundaryPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
 import { MessageActions } from "./components/MessageActions";
 import { open as openFile, save as saveFile } from "@tauri-apps/plugin-dialog";
@@ -36,27 +37,30 @@ function MessageTime({ at }: { at?: string | number }) {
                title={date.toLocaleString("zh-CN")}>{messageClock.format(date)}</time>;
 }
 
-function UserMessage({ text, at, idx, onCopy, onShare, onEdit, onRetract }: {
+function UserMessage({ text, at, idx, onCopy, onShare, onEdit, onRetract, onFeedback }: {
   text: string; at?: string | number; idx?: number;
   onCopy: (text: string) => void; onShare: (text: string) => void;
   onEdit?: (index: number, text: string) => void;
   onRetract?: (index: number) => void;
+  onFeedback: (kind: string, text: string) => void;
 }) {
   return <div className="user-turn">
     <MessageTime at={at} />
     <div className="user-msg">{text}</div>
     <MessageActions role="user" onCopy={() => onCopy(text)} onShare={() => onShare(text)}
       onEdit={onEdit ? () => onEdit(idx ?? -1, text) : undefined}
-      onRetract={onRetract && idx !== undefined ? () => onRetract(idx) : undefined} />
+      onRetract={onRetract && idx !== undefined ? () => onRetract(idx) : undefined}
+      onFeedback={(kind) => onFeedback(kind, text)} />
   </div>;
 }
 
 /** 旧端 _clean_final_text 已在 runtime 完成；这里只兜底空文本。 */
 /** 历史消息：带可展开的 thinking（从 YoAi 侧持久化记录按提问文本对齐）。 */
-function HistoryRun({ text, thinking, at, idx, onCopy, onShare, onRegenerate }: {
+function HistoryRun({ text, thinking, at, idx, onCopy, onShare, onRegenerate, onFeedback }: {
   text: string; thinking?: ThinkingRecord; at?: string; idx?: number;
   onCopy: (text: string) => void; onShare: (text: string) => void;
   onRegenerate: (index: number, text: string) => void;
+  onFeedback: (kind: string, text: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -72,15 +76,17 @@ function HistoryRun({ text, thinking, at, idx, onCopy, onShare, onRegenerate }: 
       )}
       <div className="final-answer"><Markdown text={text} /></div>
       <MessageActions role="assistant" onCopy={() => onCopy(text)} onShare={() => onShare(text)}
-        onRegenerate={idx === undefined ? undefined : () => onRegenerate(idx, text)} />
+        onRegenerate={idx === undefined ? undefined : () => onRegenerate(idx, text)}
+        onFeedback={(kind) => onFeedback(kind, text)} />
     </article>
   );
 }
 
-function ChatRun({ run, streaming, onApproval, onCopy, onShare, onRegenerate }: {
+function ChatRun({ run, streaming, onApproval, onCopy, onShare, onRegenerate, onFeedback }: {
   run: RunState; streaming: boolean; onApproval: (runId: string, allow: boolean) => void;
   onCopy: (text: string) => void; onShare: (text: string) => void;
   onRegenerate: (index: number, text: string) => void;
+  onFeedback: (kind: string, text: string) => void;
 }) {
   const rounds = useMemo(() => [...run.streamText.entries()].sort((a, b) => a[0] - b[0]), [run.streamText]);
   // 静默失败修复（对齐旧端 _task_had_error）：报错后的"完成"必须标出来
@@ -121,7 +127,8 @@ function ChatRun({ run, streaming, onApproval, onCopy, onShare, onRegenerate }: 
       {!streaming && run.finalText && (
         <MessageActions role="assistant" onCopy={() => onCopy(run.finalText)}
           onShare={() => onShare(run.finalText)}
-          onRegenerate={() => onRegenerate(-1, run.input)} />
+          onRegenerate={() => onRegenerate(-1, run.input)}
+          onFeedback={(kind) => onFeedback(kind, run.input)} />
       )}
 
       {run.approval && (
@@ -157,7 +164,7 @@ export default function App() {
   const [floating, setFloating] = useState(false);
   const savedWindow = useRef<Awaited<ReturnType<typeof shrinkWindow>> | null>(null);
   const changingWindow = useRef(false);
-  const [page, setPage] = useState<"chat" | "comms" | "galaxy">("chat");
+  const [page, setPage] = useState<"chat" | "comms" | "galaxy" | "boundary">("chat");
   const [snap, setSnap] = useState<SnapshotMsg | null>(null);
   const [permission, setPermission] = useState<{
     level: PermissionLevel; description: string;
@@ -272,6 +279,11 @@ export default function App() {
   }, [beginRun]);
 
   // ---- 消息常规操作：复制 / 分享 / 附件 / 撤回 / 编辑 / 重新生成 ----
+  // RSI R0：用户动作只作为反馈信号落盘，不触发任何自动进化
+  const recordFeedback = useCallback((kind: string, text: string) => {
+    void ipc.recordFeedback(kind, text, "").catch((e) => setErr(String(e)));
+  }, []);
+
   const copyText = useCallback(async (text: string) => {
     try {
       if (navigator.clipboard?.writeText) {
@@ -461,6 +473,8 @@ export default function App() {
                 onClick={() => setPage("comms")}>通讯</button>
         <button className={`nav-item ${page === "galaxy" ? "active" : ""}`} title="星球系" aria-current={page === "galaxy" ? "page" : undefined}
                 onClick={() => setPage("galaxy")}>星球</button>
+        <button className={`nav-item ${page === "boundary" ? "active" : ""}`} title="能力边界看板" aria-current={page === "boundary" ? "page" : undefined}
+                onClick={() => setPage("boundary")}>边界</button>
         <div className="nav-spacer" />
         <button className="nav-item ghost" title="切换纸墨主题" onClick={toggleTheme}>
           {theme === "light" ? "墨" : "纸"}
@@ -483,13 +497,14 @@ export default function App() {
                 {(snap?.history ?? []).map((h, i, arr) => {
                   if (h.role === "user") return <UserMessage key={`h${i}`} text={h.text} at={h.at}
                     idx={h.idx} onCopy={copyText} onShare={shareSingle}
-                    onEdit={startEdit} onRetract={retract} />;
+                    onEdit={startEdit} onRetract={retract} onFeedback={recordFeedback} />;
                   // 对齐 thinking：找最近一条用户提问匹配该记录的 input
                   const prevUser = [...arr.slice(0, i)].reverse().find((m) => m.role === "user");
                   const think = (snap?.thinking_log ?? []).find(
                     (t) => t.input && prevUser && t.input.trim() === prevUser.text.trim());
                   return <HistoryRun key={`h${i}`} text={h.text} thinking={think} at={h.at}
-                    idx={h.idx} onCopy={copyText} onShare={shareSingle} onRegenerate={regenerate} />;
+                    idx={h.idx} onCopy={copyText} onShare={shareSingle} onRegenerate={regenerate}
+                    onFeedback={recordFeedback} />;
                 })}
                 {runList.length === 0 && (snap?.history ?? []).length === 0 && (
                   <div className="empty">输入一个任务，开始与 YoAi 对话。</div>
@@ -498,9 +513,10 @@ export default function App() {
                   <div key={run.runId}>
                     <UserMessage text={run.input} at={run.startedAt}
                       onCopy={copyText} onShare={shareSingle}
-                      onEdit={startEdit} />
+                      onEdit={startEdit} onFeedback={recordFeedback} />
                     <ChatRun run={run} streaming={run.runId === activeRunId}
                              onCopy={copyText} onShare={shareSingle} onRegenerate={regenerate}
+                             onFeedback={recordFeedback}
                              onApproval={(runId, allow) => {
                                clearApproval(runId);   // 点了立即消失
                                void ipc.replyApproval(run.taskId, run.runId, allow)
@@ -574,6 +590,7 @@ export default function App() {
 
         {page === "comms" && <CommsPage />}
         {page === "galaxy" && <GalaxyPage />}
+        {page === "boundary" && <BoundaryPage />}
       </div>
 
       {dialog?.kind === "rename" && (

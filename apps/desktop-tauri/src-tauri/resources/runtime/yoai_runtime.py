@@ -61,10 +61,12 @@ for _p in _candidates:
         sys.path.insert(0, str(_p))
 
 from protocol import (  # noqa: E402  (自举后导入)
-    PROTOCOL_VERSION, Seq, approval_request, archive_state, attachment_ready,
-    browser_opened, chat_msg, chat_state, encode, error, event, file_changed,
-    file_content, file_tree, final, evolution_report, message_updated,
-    permission_state, ready, share_exported, snapshot, status,
+    PROTOCOL_VERSION, Seq, approval_recorded, approval_request, archive_state,
+    attachment_ready, boundary_state, browser_opened, chat_msg, chat_state,
+    encode, error, event, file_changed, file_content, file_tree, final,
+    evolution_report, feedback_recorded, message_updated, permission_state,
+    ready, rsi_promoted, rsi_rolled_back, rsi_triggered, rsi_validated,
+    share_exported, snapshot, status, trial_report, trial_state,
 )
 
 
@@ -113,6 +115,10 @@ class Runtime:
         self.actions: Any = None           # ConversationActions（撤回/编辑覆盖层）
         self.attachments: Any = None       # 附件目录根
         self.evolution_reports: Any = None # EvolutionReportStore（显式进化审计）
+        self.feedback_store: Any = None    # FeedbackStore（R0 用户反馈信号）
+        self.trial_store: Any = None       # TrialStore（R3.2 试用批次）
+        self.router: Any = None            # ExpertRouter（trial scope 覆盖）
+        self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
         self._write_lock = asyncio.Lock()
 
     # ---- 输出 ----
@@ -138,13 +144,17 @@ class Runtime:
         self.file_changes = FileChangeStore(data_dir)
         self.actions = ConversationActions(data_dir)
         self.attachments = data_dir / "attachments"
-        from yoai.evolution import EvolutionReportStore
+        from yoai.evolution import EvolutionReportStore, TrialStore
+        from yoai.evidence import FeedbackStore
         self.evolution_reports = EvolutionReportStore(data_dir)
+        self.feedback_store = FeedbackStore(data_dir)
+        self.trial_store = TrialStore(data_dir)
         channel_cb = make_sidecar_channel(self._request_host)
         self.model_options = available_main_models()
         preferred = UserConfig(data_dir).load().get("desktop_model")
         self.model_id = preferred if isinstance(preferred, str) and preferred in self.model_options else next(iter(self.model_options))
         provider, _archive = build_main_model(data_dir, model_id=self.model_id)
+        self.router = getattr(provider, "router", None)
         def kwargs_for_session(session: Any) -> dict[str, Any] | None:
             """项目模式：给该会话的 agent 挂项目读写工具；聊天模式返回 None 用默认。"""
             if getattr(session, "mode", "chat") != "project":
@@ -541,6 +551,75 @@ class Runtime:
             })
         return archive_state(nodes=nodes)
 
+    def _trial_for_task(self, task: str):
+        if self.trial_store is None:
+            return None
+        from yoai.evolution.fingerprint import fingerprint
+        tags = fingerprint(task).tags
+        for record in self.trial_store.list(status="running"):
+            if record.scope.startswith("tag:") and record.primary_tag in tags:
+                return record
+        return None
+
+    async def _run_shadow_parent(self, task: str, trial) -> None:
+        """R3.3：同题后台跑 parent，只落 trial 证据，不推 UI、不污染记忆。"""
+        if self.evidence_store is None:
+            return
+        from yai_core.memory import InMemoryStore
+        from yoai.agent import YoAiAgent
+        from yoai.evidence import ExecutionEvidenceCollector, SAMPLE_TRIAL
+        from yoai.evolution import EvolutionArchive, ForcedExpertRouter
+        from yoai.evolution.fingerprint import fingerprint as evo_fingerprint
+        from yoai.models import ExpertModelProvider
+
+        try:
+            archive = EvolutionArchive(_data_dir() / "evolution" / "evolution.json")
+            parent = archive.get(trial.parent_id)
+            if parent is None:
+                return
+            base = getattr(self.agent.model, "base", None) or self.agent.model
+            forced_router = ForcedExpertRouter(archive, parent.id)
+            shadow_provider = ExpertModelProvider(base, forced_router, archive)
+            shadow_agent = YoAiAgent(
+                model=shadow_provider, data_dir=_data_dir() / "shadow",
+                memory=InMemoryStore(), temporal_memory=False,
+                builtin_tools=False, outcome_verifier=None,
+            )
+            collector = ExecutionEvidenceCollector()
+            async for event in shadow_agent.astream(task):
+                collector.observe(event)
+            fp = evo_fingerprint(task)
+            evidence = collector.finish(
+                session_id=f"shadow-{trial.id}", task=task,
+                task_fingerprint=fp.key, fingerprint_tags=fp.tags,
+                sample_class=SAMPLE_TRIAL, expert_id=parent.id,
+                parent_id=parent.parent_id or "", trial_id=trial.id,
+                trial_role="parent",
+            )
+            self.evidence_store.add(evidence)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"parent shadow failed: {exc}")
+
+    def _trial_controller(self):
+        from yoai.evolution import EvolutionArchive, TrialController
+        if (self.evidence_store is None or self.feedback_store is None
+                or self.evolution_reports is None or self.trial_store is None):
+            raise RuntimeError("RSI 试用存储尚未初始化")
+        archive = EvolutionArchive(_data_dir() / "evolution" / "evolution.json")
+        return TrialController(archive, self.evidence_store, self.feedback_store,
+                               self.evolution_reports, self.trial_store)
+
+    async def _push_boundary_state(self) -> None:
+        """RSI R1：把能力边界统计推给看板（只统计，不触发进化）。"""
+        from yoai.evidence import build_boundary_report
+        if self.evidence_store is None or self.feedback_store is None:
+            report = {"window_days": 30, "total": 0, "success": 0,
+                      "success_rate": 0.0, "rework": 0, "rework_rate": 0.0, "rows": []}
+        else:
+            report = build_boundary_report(
+                self.evidence_store, self.feedback_store).to_dict()
+        await self.send(boundary_state(report=report))
+
     # ---- 任务执行 ----
     async def start_task(self, task_id: str, run_id: str, user_input: str) -> None:
         try:
@@ -585,6 +664,16 @@ class Runtime:
                     }
                 except Exception:  # noqa: BLE001
                     evidence_meta = {}
+
+                trial_for_task = self._trial_for_task(user_input)
+                if trial_for_task and evidence_meta:
+                    evidence_meta.update({
+                        "sample_class": "trial",
+                        "expert_id": trial_for_task.node_id,
+                        "parent_id": trial_for_task.parent_id,
+                        "trial_id": trial_for_task.id,
+                        "trial_role": "child",
+                    })
 
                 async for ev in self.agent.astream(user_input):
                     name = getattr(ev.type, "value", str(ev.type))
@@ -679,8 +768,29 @@ class Runtime:
                         parent_id=parent_id,
                         usage_override=usage_override,
                         route_decision=decision.to_dict() if decision else None,
+                        trial_id=meta.get("trial_id", ""),
+                        trial_role=meta.get("trial_role", ""),
                     )
                     self.evidence_store.add(evidence)
+                    self.run_evidence[run_id] = evidence.id
+                    if trial_for_task and trial_for_task.id == meta.get("trial_id", ""):
+                        await self._run_shadow_parent(user_input, trial_for_task)
+
+                    # R3.3：active 节点每次真实任务后做回归监控，命中则退役回退。
+                    if (expert_id and self.feedback_store is not None
+                            and self.evolution_reports is not None):
+                        from yoai.evolution import EvolutionArchive, RollbackMonitor
+                        active_archive = EvolutionArchive(
+                            _data_dir() / "evolution" / "evolution.json")
+                        active_node = active_archive.get(expert_id)
+                        if active_node and active_node.lifecycle == "active":
+                            rollback = RollbackMonitor(
+                                active_archive, self.evidence_store,
+                                self.feedback_store, self.evolution_reports).check(expert_id)
+                            if rollback.rolled_back:
+                                await self.send(rsi_rolled_back(decision=rollback.to_dict()))
+                                await self.send(self._archive_state())
+
                     attribution = AttributionEngine(self.evidence_store).attribute(evidence)
                     self.evidence_store.add_attribution(attribution)
 
@@ -1039,6 +1149,141 @@ class Runtime:
                 await self.send(share_exported(path=str(path), count=count))
             except OSError as exc:
                 await self.send(error("share", f"导出失败：{exc}"))
+        elif typ == "rsi.trial_start":
+            try:
+                controller = self._trial_controller()
+                record = controller.start(
+                    str(cmd.get("node_id", "")), str(cmd.get("scope", "")),
+                    int(cmd.get("max_n", 20)))
+                if self.router is not None and record.scope.startswith("tag:"):
+                    self.router.set_trial(record.node_id, record.scope)
+                await self.send(trial_state(record=record.to_dict()))
+                await self.send(self._archive_state())
+            except (ValueError, RuntimeError) as exc:
+                await self.send(error("message", str(exc)))
+        elif typ == "rsi.trial_stop":
+            try:
+                controller = self._trial_controller()
+                record = controller.stop(str(cmd.get("trial_id", "")),
+                                         str(cmd.get("reason", "")))
+                if record and self.router and self.router.trial_node_id == record.node_id:
+                    self.router.clear_trial()
+                await self.send(trial_state(record=record.to_dict() if record else {}))
+                await self.send(self._archive_state())
+            except (ValueError, RuntimeError) as exc:
+                await self.send(error("message", str(exc)))
+        elif typ == "rsi.trial_report":
+            try:
+                report = self._trial_controller().report(str(cmd.get("trial_id", "")))
+                await self.send(trial_report(report=report.to_dict()))
+            except (ValueError, RuntimeError) as exc:
+                await self.send(error("message", str(exc)))
+        elif typ in ("rsi.promote_active", "rsi.reject"):
+            try:
+                controller = self._trial_controller()
+                trial_id = str(cmd.get("trial_id", ""))
+                record = controller.trials.get(trial_id)
+                if typ == "rsi.promote_active":
+                    report = controller.approve(
+                        trial_id, str(cmd.get("approved_by", "")),
+                        str(cmd.get("reason", "")))
+                    to_state, verdict = "active", "approved"
+                    reason = report.reason
+                else:
+                    updated = controller.reject(trial_id, str(cmd.get("reason", "")))
+                    to_state, verdict = "retired", "rejected"
+                    reason = str(cmd.get("reason", "")) or "试用被拒绝"
+                if record and self.router and self.router.trial_node_id == record.node_id:
+                    self.router.clear_trial()
+                decision = {"node_id": record.node_id if record else "",
+                            "from_state": "probation", "to_state": to_state,
+                            "changed": True, "reason": reason, "verdict": verdict}
+                await self.send(approval_recorded(decision=decision))
+                await self.send(rsi_promoted(decision=decision))
+                await self.send(self._archive_state())
+            except (ValueError, RuntimeError) as exc:
+                await self.send(error("message", str(exc)))
+        elif typ == "rsi.rollback":
+            try:
+                from yoai.evolution import EvolutionArchive, RollbackMonitor
+                if self.evidence_store is None or self.feedback_store is None \
+                        or self.evolution_reports is None:
+                    raise RuntimeError("RSI 回滚存储尚未初始化")
+                archive = EvolutionArchive(_data_dir() / "evolution" / "evolution.json")
+                decision = RollbackMonitor(archive, self.evidence_store,
+                                           self.feedback_store,
+                                           self.evolution_reports).check(
+                    str(cmd.get("node_id", "")))
+                await self.send(rsi_rolled_back(decision=decision.to_dict()))
+                await self.send(self._archive_state())
+            except (ValueError, RuntimeError) as exc:
+                await self.send(error("message", str(exc)))
+        elif typ == "rsi.validate":
+            # R2.2 验证 + R3.1 受控晋升：improved→probation，regression→retired；
+            # 绝不直接 active。
+            from yoai.evolution import CandidateValidator, EvolutionArchive, R3Promoter
+            if self.evidence_store is None or self.evolution_reports is None:
+                await self.send(error("message", "RSI 验证存储尚未初始化"))
+                return True
+            archive = EvolutionArchive(_data_dir() / "evolution" / "evolution.json")
+            validator = CandidateValidator(archive, self.evidence_store, self.evolution_reports)
+            validation = validator.validate(str(cmd.get("node_id", "")))
+            await self.send(rsi_validated(validation=validation.to_dict()))
+            promoter = R3Promoter(archive, self.evidence_store, self.evolution_reports)
+            decision = promoter.apply(validation)
+            await self.send(rsi_promoted(decision=decision.to_dict()))
+            await self.send(self._archive_state())
+        elif typ == "rsi.trigger":
+            # R2.1：shadow 触发，只生成 candidate 节点，不进路由、不晋升。
+            from yoai.evidence import build_boundary_report
+            from yoai.evolution import EvolutionArchive, TriggerEngine
+            if (self.evidence_store is None or self.feedback_store is None
+                    or self.evolution_reports is None):
+                await self.send(error("message", "RSI 存储尚未初始化"))
+                return True
+            tags = [str(t) for t in (cmd.get("tags") or []) if str(t).strip()]
+            archive = EvolutionArchive(_data_dir() / "evolution" / "evolution.json")
+            report = build_boundary_report(self.evidence_store, self.feedback_store)
+            engine = TriggerEngine(archive, self.evidence_store, self.evolution_reports)
+            decisions = [d.to_dict() for d in engine.evaluate(report, tags=tags)]
+            await self.send(rsi_triggered(decisions=decisions))
+            await self.send(self._archive_state())
+            await self._push_boundary_state()
+        elif typ == "boundary.get":
+            await self._push_boundary_state()
+        elif typ == "feedback.record":
+            # RSI R0：只采集用户动作，不做任何触发/晋升判断。
+            import uuid
+            from yoai.evidence import FeedbackSignal
+            from yoai.evolution.fingerprint import fingerprint
+            kind = str(cmd.get("kind", "")).strip()
+            polarity = -1 if kind in ("retract", "edit", "regenerate") else (
+                1 if kind in ("copy", "share") else 0)
+            task = str(cmd.get("task", ""))
+            run_id = str(cmd.get("run_id", ""))
+            evidence = None
+            if self.evidence_store is not None:
+                evidence_id = self.run_evidence.get(run_id) or str(cmd.get("evidence_id", ""))
+                if evidence_id:
+                    evidence = self.evidence_store.get(evidence_id)
+                if evidence is None and task:
+                    matches = [e for e in self.evidence_store.query()
+                               if e.task == task or task in e.task]
+                    evidence = matches[-1] if matches else None
+            fp = fingerprint(task) if task else None
+            signal = FeedbackSignal(
+                id=uuid.uuid4().hex[:12],
+                evidence_id=evidence.id if evidence else str(cmd.get("evidence_id", "")),
+                run_id=run_id, session_id=str(cmd.get("session_id", "") or self._session_id()),
+                kind=kind, polarity=polarity,
+                task_fingerprint=evidence.task_fingerprint if evidence else (fp.key if fp else ""),
+                fingerprint_tags=evidence.fingerprint_tags if evidence else (fp.tags if fp else ()),
+                note=str(cmd.get("note", ""))[:500],
+            )
+            if self.feedback_store is not None:
+                self.feedback_store.add(signal)
+            await self.send(feedback_recorded(signal=signal.to_dict()))
+            await self._push_boundary_state()
         elif typ == "shutdown":
             for task in list(self.tasks.values()):
                 task.cancel()

@@ -34,6 +34,13 @@
 | **消息动作与附件(2026-11-26)** | 设计见 `MESSAGE-ACTIONS-DESIGN.md`：用户专有=附件/编辑/撤回，智能体专有=重新生成/停止/思考/产物，两者都有=复制/分享；附件文本抽取进上下文，撤回/编辑软删除+分支（Core 历史零改写），分享导出本地 md/html；协议 v1 追加 6 命令 3 消息 | MESSAGE-ACTIONS-DESIGN.md / IPC-PROTOCOL.md |
 | **进化树研究(2026-11-26)** | 结论：骨架完整、闭环未通、价值未证（生产未调 EvolutionEngine、parent 样本为 0、两次 D<A）。已拍板补 A 闭环：生产显式开关 `YOAI_EVOLUTION=1` + 报告持久化 + 父子成对验证样本 + 星图证据链；先小样本判定 | EVOLUTION-TREE-RESEARCH.md |
 | **进化树30题判定(2026-11-26)** | A 73.3%/B 76.7%/C 73.3%/D 76.7%；D vs C +3.3pp、McNemar p=1.0，不显著，**不跑全量**；父子验证样本 parent_items 从 0→28，但按标签分组仍 insufficient；judge 因网关切换改 spark-x2.6 | EVOLUTION-AB-30-RESULT.md |
+| **RSI R0 反馈信号(2026-11-26)** | 编辑/撤回/重新生成/复制/分享动作全部写 `evidence/feedback.jsonl`，绑定执行证据与能力标签；协议追加 feedback.record/recorded；**只采集，不触发进化**；Python 279 tests / 前端 24 passed | RSI-PRODUCT-RESEARCH.md |
+| **RSI R1 能力边界看板(2026-11-26)** | 左侧导航新增「边界」页；按能力标签展示样本数、成功率、Wilson 区间、返工率、正向信号、相对基线与状态分级；协议追加 boundary.get/state；**只统计，不触发进化**；Python 282 tests / 前端 25 passed | RSI-PRODUCT-RESEARCH.md |
+| **RSI R2.1 shadow 触发(2026-11-26)** | 新增 TriggerEngine：样本≥20+weak+归因门槛+7天冷却才生成 candidate；一次只改一个能力维度；看板薄弱行可手动触发，星图显示候选与触发报告；**不进路由、不晋升**；协议追加 rsi.trigger/triggered | RSI-PRODUCT-RESEARCH.md |
+| **RSI R2.2 隔离验证(2026-11-26)** | 新增 CandidateValidator + rsi.validate/validated；星图候选节点可手动验证；三类 smoke 结论 improved/regression/no_regression 均不晋升；协议/文档/台账同步 | RSI-PRODUCT-RESEARCH.md |
+| **RSI R3.1 受控晋升(2026-11-26)** | R3Promoter 接 rsi.validate：improved→probation、regression→retired、其余留 candidate；样本≥5/单维度/成本≤父节点+20% 硬门槛；协议追加 rsi.promoted，星图显示结果；**绝不直接 active** | RSI-PROMOTION-PLAN.md |
+| **RSI R3.2 试用与批准(2026-11-26)** | TrialStore/Controller + SAMPLE_TRIAL 隔离 + tag scope 临时路由 + 人工批准/拒绝；smoke 中 temporal probation→trial→active；协议追加 trial/approval 消息；Python 294 tests / 前端 25 passed | RSI-PROMOTION-PLAN.md |
+| **RSI R3.3 shadow/回滚(2026-11-26)** | 真实任务 trial 命中时后台隔离跑 parent 并落成对的 trial 证据；active 节点每次任务后做 30 天回归监控，命中自动 retired 回退父节点；星图可手动检查回滚；协议追加 rsi.rollback/rolled_back | RSI-PROMOTION-PLAN.md |
 | **runtime 接入修复(2026-11-25 上午)** | 修复 4 个真 bug：①start_task 漏 create_task（任务从未执行）②数据目录指错（旧会话不可见）③YAI_CORE_SRC 指向 src 致网关静默降级 ④空目录首次启动 KeyError；补单实例守卫；实测 task→161 事件→final→done，dist exe 重编 9.9MB；全量 241 passed | OLD-UI-MIGRATION.md 第七节 |
 | **旧端UI搬迁+清理(2026-11-25)** | PySide6 端全部能力搬入 Tauri 新端（会话管理/侧栏卡片/通讯页/星球系/纸墨主题/错误可见/模型chip/证据落盘），随后旧端源码删除（src/yoai/desktop/ 16文件+cosmic 7文件+10个Qt测试+yoai.spec）；协议 v1 追加 snapshot/chat.*/archive.*；新增 yoai/bootstrap.py 承接 agent 组装；全量 **241 passed**、前端 8 passed、Rust 构建成功、dist/YoAi.exe+runtime 已更新；dist/YoAi-PySide6.exe 留作回退 | OLD-UI-MIGRATION.md |
 | 进程/单实例 | QLocalSocket单实例守卫(进程死OS自动释放，无陈旧锁)；worker的requestInterruption真cancel asyncio任务，根治关窗后YoAi.exe残留 | src/yoai/desktop/single_instance.py |

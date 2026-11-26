@@ -538,6 +538,46 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 .attachment-chip button { border: none; background: transparent; padding: 0 2px; line-height: 1; }
 .user-turn { display: flex; flex-direction: column; align-items: flex-end; }
 
+/* RSI R1 能力边界看板 */
+.boundary-page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-6); }
+.boundary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); }
+.boundary-head h2 { margin: 0; font-size: var(--fs-h2); font-weight: 500; }
+.boundary-head p { margin: 4px 0 0; font-size: var(--fs-note); color: var(--dim); }
+.boundary-summary { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: var(--sp-3); margin: var(--sp-4) 0; }
+.boundary-stat { background: var(--surface); border: 1px solid var(--rule);
+  border-radius: var(--radius); padding: var(--sp-3); display: flex; flex-direction: column; gap: 4px; }
+.boundary-stat span { font-size: var(--fs-cap); color: var(--dim); }
+.boundary-stat b { font-size: 20px; font-weight: 500; font-family: var(--font-num); }
+.boundary-empty { padding: var(--sp-6); text-align: center; color: var(--weak);
+  border: 1px dashed var(--rule); border-radius: var(--radius); }
+.boundary-table-wrap { border: 1px solid var(--rule); border-radius: var(--radius); overflow: auto; }
+.boundary-table { width: 100%; border-collapse: collapse; font-size: var(--fs-note); }
+.boundary-table th, .boundary-table td { padding: 8px 10px; text-align: left;
+  border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.boundary-table th { background: var(--surface-2); color: var(--dim); font-weight: 500; }
+.boundary-table tr:last-child td { border-bottom: none; }
+.boundary-tag { font-family: var(--font-mono); }
+.boundary-bar { position: relative; width: 140px; height: 8px; background: var(--surface-2);
+  border: 1px solid var(--rule); border-radius: 2px; overflow: visible; }
+.boundary-bar span { position: absolute; inset: 0 auto 0 0; background: var(--ok); }
+.boundary-bar i { position: absolute; top: -2px; width: 1px; height: 12px; background: var(--ink); }
+.boundary-table small { display: block; margin-top: 4px; color: var(--weak); font-family: var(--font-num); }
+.boundary-neg { color: var(--bad); }
+.boundary-pos { color: var(--ok); }
+.boundary-status { padding: 2px 8px; border: 1px solid var(--rule); border-radius: 999px; font-size: var(--fs-cap); }
+.st-healthy { color: var(--ok); border-color: var(--ok); }
+.st-watch { color: var(--warn); border-color: var(--warn); }
+.st-weak { color: var(--bad); border-color: var(--bad); }
+.st-insufficient { color: var(--weak); }
+.boundary-note { font-size: var(--fs-cap); color: var(--weak); margin-top: var(--sp-3); }
+.boundary-notice { margin-top: var(--sp-2); padding: 6px 10px; font-size: var(--fs-note);
+  color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent);
+  border-radius: var(--radius-sm); }
+.boundary-trigger { display: block; margin-top: 4px; padding: 2px 7px; font-size: var(--fs-cap); }
+.evo-trial-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--sp-1); }
+.evo-trial-actions .boundary-trigger { margin-top: 0; }
+
 /* 星图节点的进化审计与证据链 */
 .evo-reports, .evo-evidence { margin-top: var(--sp-2); border-top: 1px solid var(--rule); padding-top: var(--sp-1); }
 .evo-report { padding: var(--sp-1) 0; font-size: var(--fs-cap); color: var(--dim);
