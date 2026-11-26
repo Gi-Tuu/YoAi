@@ -117,6 +117,7 @@ class Runtime:
         self.evolution_reports: Any = None # EvolutionReportStore（显式进化审计）
         self.feedback_store: Any = None    # FeedbackStore（R0 用户反馈信号）
         self.trial_store: Any = None       # TrialStore（R3.2 试用批次）
+        self.mcp_manager: Any = None       # McpManager（标准 MCP 客户端）
         self.router: Any = None            # ExpertRouter（trial scope 覆盖）
         self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
         self._write_lock = asyncio.Lock()
@@ -149,12 +150,16 @@ class Runtime:
         self.evolution_reports = EvolutionReportStore(data_dir)
         self.feedback_store = FeedbackStore(data_dir)
         self.trial_store = TrialStore(data_dir)
+        from yoai.mcp import McpManager
+        self.mcp_manager = McpManager(data_dir)
         channel_cb = make_sidecar_channel(self._request_host)
         self.model_options = available_main_models()
         preferred = UserConfig(data_dir).load().get("desktop_model")
         self.model_id = preferred if isinstance(preferred, str) and preferred in self.model_options else next(iter(self.model_options))
         provider, _archive = build_main_model(data_dir, model_id=self.model_id)
         self.router = getattr(provider, "router", None)
+        agent_kwargs_base = agent_kwargs(data_dir, channel=channel_cb)
+        agent_kwargs_base["mcp_manager"] = self.mcp_manager
         def kwargs_for_session(session: Any) -> dict[str, Any] | None:
             """项目模式：给该会话的 agent 挂项目读写工具；聊天模式返回 None 用默认。"""
             if getattr(session, "mode", "chat") != "project":
@@ -179,7 +184,7 @@ class Runtime:
         self.sessions = SessionManager(
             data_dir / "sessions",
             model_factory=lambda: provider,
-            agent_kwargs=agent_kwargs(data_dir, channel=channel_cb),
+            agent_kwargs=agent_kwargs_base,
             agent_kwargs_for_session=kwargs_for_session,
             memory_dir_for_session=memory_dir_for_session,
             memory_for_session=lambda sid, store: ConversationMemory(store, self.actions, sid),
@@ -1290,6 +1295,8 @@ class Runtime:
             for fut in self.pending_approvals.values():
                 if not fut.done():
                     fut.cancel()
+            if self.mcp_manager is not None:
+                self.mcp_manager.close()
             return False
         else:
             await self.send(error("protocol", f"unknown command: {typ}",

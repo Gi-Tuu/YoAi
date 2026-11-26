@@ -77,6 +77,7 @@ class YoAiAgent:
         change_context: dict[str, str] | None = None,  # {session_id, project_id}
         channel: Any = None,
         policy: Any = None,
+        mcp_manager: Any = None,
         model_timeout: float | None = "env",  # type: ignore[assignment]
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
@@ -175,6 +176,10 @@ class YoAiAgent:
         # Core 内省公开方法 → ToolSpec，注册进统一 ToolRegistry。
         self.file_change_store = file_change_store
         self.change_context = dict(change_context or {})
+        if mcp_manager is None:
+            from yoai.mcp import McpManager
+            mcp_manager = McpManager(data_dir)
+        self.mcp_manager = mcp_manager
         self._all_tool_specs = self._build_all_specs(
             builtin_tools, workspace_root, readonly_roots, project_root, project_name)
         self.core.register_tools(self._all_tool_specs)
@@ -242,6 +247,15 @@ class YoAiAgent:
                     print(f"[yoai] file change record failed: {exc}", file=_sys.stderr, flush=True)
 
             specs = specs + project_tool_specs(project_root, project_name, on_change=_on_change)
+        # MCP：标准协议外部 server 暴露的工具，经 Core ToolSpec(source=mcp) 同构注册。
+        # 配置无 server 时零开销；坏 server 不影响其它工具。
+        manager = getattr(self, "mcp_manager", None)
+        if manager is not None:
+            try:
+                specs = specs + manager.tool_specs()
+            except Exception as exc:  # noqa: BLE001
+                import sys as _sys
+                print(f"[yoai] mcp discovery failed: {exc}", file=_sys.stderr, flush=True)
         # list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
         # request_capability 由 Core 的 discovery 机制注册为 meta_tool 并拦截处理。
         specs.append(self._build_list_tools_spec())
