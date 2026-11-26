@@ -15,8 +15,9 @@ describe("技能页", () => {
     await act(async () => {
       ipc.inject({ v: 1, type: "skill.state", status: {
         config: "cfg",
-        skills: [{ name: "research", description: "调研", prompt: "先列主题", tools: ["web_search"] }],
-        tools: ["skill_load", "skill_list"],
+        skills: [{ name: "research", description: "调研", prompt: "先列主题", tools: ["web_search"],
+          enforce_tools: false, scripts: [], resources: [] }],
+        tools: ["skill_load", "skill_list", "skill_run", "skill_resource_read"],
       } });
       ipc.inject({ v: 1, type: "skill.config", text: '{"skills": []}' });
       await new Promise((r) => setTimeout(r, 50));

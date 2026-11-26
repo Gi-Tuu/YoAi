@@ -198,6 +198,14 @@ class YoAiAgent:
         self._plugin_tool_names: dict[str, str] = {}        # 工具名 → 来源插件 stem
         self.tool_filter = tool_filter
         self._active_whitelist: set[str] | None = None
+        self._skill_whitelist: set[str] | None = None
+
+    def set_skill_whitelist(self, tools: set[str]) -> None:
+        """技能声明 enforce_tools 后叠加白名单；下次 astream 生效。"""
+        self._skill_whitelist = set(tools)
+
+    def clear_skill_whitelist(self) -> None:
+        self._skill_whitelist = None
 
     def _build_all_specs(
         self,
@@ -265,7 +273,7 @@ class YoAiAgent:
         skill_store = getattr(self, "skill_store", None)
         if skill_store is not None:
             try:
-                specs = specs + skill_store.tool_specs()
+                specs = specs + skill_store.tool_specs(self)
             except Exception as exc:  # noqa: BLE001
                 import sys as _sys
                 print(f"[yoai] skill discovery failed: {exc}", file=_sys.stderr, flush=True)
@@ -298,9 +306,16 @@ class YoAiAgent:
         就地改 _tools 而不是替换 registry 对象——loop 在构造时已绑定旧引用（见 agent.py
         memory 同理）。这是 YoAi 内对 Core 对象的操作，不修改 Core 源码。
         """
-        if self.tool_filter is None:
+        base = self.tool_filter(task) if self.tool_filter is not None else None
+        skill = getattr(self, "_skill_whitelist", None)
+        if base is None and skill is None:
             return
-        whitelist = self.tool_filter(task)
+        if base is None:
+            whitelist: set[str] | None = set(skill) if skill else None
+        elif skill is None:
+            whitelist = set(base)
+        else:
+            whitelist = set(base) & set(skill)
         if whitelist == self._active_whitelist:
             return   # 无变化，避免每次重建
         reg = self.core.registry

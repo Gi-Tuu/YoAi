@@ -47,6 +47,8 @@ export function SkillPage() {
             <div key={skill.name} className="mcp-server">
               <div><b>{skill.name}</b><span>{skill.description}</span></div>
               <div className="mcp-meta">建议工具：{skill.tools.join(", ") || "无"}</div>
+              <div className="mcp-meta">脚本：{status?.skills.find((s) => s.name === skill.name)?.scripts?.join(", ") || "无"}</div>
+              <div className="mcp-meta">资源：{status?.skills.find((s) => s.name === skill.name)?.resources?.join(", ") || "无"}</div>
               <pre className="mcp-stderr">{skill.prompt}</pre>
             </div>
           ))}

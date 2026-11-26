@@ -319,7 +319,9 @@ export interface SkillStateMsg extends BaseMsg {
   type: "skill.state";
   status: {
     config: string;
-    skills: Array<{ name: string; description: string; prompt: string; tools: string[] }>;
+    skills: Array<{ name: string; description: string; prompt: string; tools: string[];
+      enforce_tools: boolean; scripts: Array<{ name: string; path: string; description: string; timeout: number }>;
+      resources: string[] }>;
     tools: string[];
   };
 }

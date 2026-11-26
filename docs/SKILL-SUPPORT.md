@@ -28,12 +28,41 @@
 
 ## 工具
 
-自动注册两个元工具：
+自动注册四个元工具：
 
-- `skill_list()`：列出可用技能名称与描述；
-- `skill_load(name)`：返回该技能的 prompt 与建议工具列表。
+- `skill_list()`：列出技能、脚本包、资源包；
+- `skill_load(name)`：返回 prompt、建议工具、脚本/资源清单；`enforce_tools=true` 时叠加工具白名单；
+- `skill_run(name, script, args)`：运行声明的脚本包；
+- `skill_resource_read(name, path)`：读取声明的资源包文本文件。
 
 模型按需调用 `skill_load` 后才看到技能细节，避免所有技能提示词常驻上下文。
+
+## 脚本包与资源包
+
+目录约定（相对 `<data_dir>/skills/<name>/`）：
+
+```json
+{
+  "skills": [{
+    "name": "demo",
+    "prompt": "演示技能",
+    "tools": ["web_search"],
+    "enforce_tools": true,
+    "scripts": [{"name": "upper", "path": "scripts/upper.py", "timeout": 15}],
+    "resources": ["templates/report.md"]
+  }]
+}
+```
+
+- 脚本：`sys.executable <script.py>`，stdin 传 JSON args，stdout 解析 JSON 或按文本返回；
+  不经 shell，白名单环境变量，超时终止，cwd 限定技能目录。
+- 资源：只能是 manifest 中声明的路径，禁止 `..` 逃逸，文本上限 20 万字符。
+
+## 强制工具白名单
+
+`enforce_tools=true` 时，调用 `skill_load` 会在当前 agent 叠加白名单：
+技能声明工具 + `skill_list/load/run/resource_read/list_tools`；
+再与专家白名单取交集，下一轮 `astream` 生效。技能加载工具始终保留，避免把自己锁死。
 
 ## 安全边界
 
@@ -46,14 +75,13 @@
 
 左侧「技能」页：
 - 查看技能名称、描述、prompt、建议工具；
-- 查看 `skill_list` / `skill_load` 两个元工具；
+- 查看 `skill_list` / `skill_load` / `skill_run` / `skill_resource_read` 四个元工具；
 - 直接编辑并保存 `skills.json`，保存后立即重载。
 
 协议：`skill.status` / `skill.config_get` / `skill.config_set` / `skill.reload`。
 
 ## 明确未做
 
-- Skill 内的脚本包 / 资源文件 / 版本依赖；
-- Skill 自动绑定工具白名单并强制过滤；
+- Skill 依赖版本管理（requirements / lockfile）；
 - Skill 市场或远程安装；
 - Skill 自动纳入 RSI 候选（后续可做）。
