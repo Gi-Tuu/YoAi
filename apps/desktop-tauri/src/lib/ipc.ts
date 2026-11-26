@@ -166,6 +166,28 @@ export class IpcClient {
     await this.send({ v: PROTOCOL_VERSION, type: "fs.read", path });
   }
 
+  // ---- 附件 / 消息动作 / 分享 ----
+  async prepareAttachment(path: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "attachment.prepare", path });
+  }
+  async removeAttachment(id: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "attachment.remove", id });
+  }
+  async retractMessage(index: number): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "message.retract", index });
+  }
+  async editMessage(index: number, input: string, taskId: string, runId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "message.edit", index, input,
+      task_id: taskId, run_id: runId });
+  }
+  async regenerate(index: number, input: string, taskId: string, runId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "task.regenerate", index, input,
+      task_id: taskId, run_id: runId });
+  }
+  async shareExport(path: string, content: string, count: number): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "share.export", path, content, count });
+  }
+
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });
     this.disconnect();

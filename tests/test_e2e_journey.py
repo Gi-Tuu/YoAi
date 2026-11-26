@@ -374,3 +374,69 @@ def test_tool_dock_browser_open(monkeypatch):
     run(rt.handle({"type": "browser.open", "url": "file:///etc/passwd"}))
     assert any(m["type"] == "error" and m["stage"] == "browser" for m in out)
     assert not any(m["type"] == "browser.opened" for m in out)
+
+
+def test_message_actions_retract_and_edit(tmp_path):
+    """撤回/编辑走软删除+分支：UI/模型读视图过滤，原始 Core 历史不动。"""
+    from yoai.conversation_actions import ConversationActions, ConversationMemory
+
+    actions = ConversationActions(tmp_path)
+    messages = [
+        SimpleNamespace(role="user", content="旧问题"),
+        SimpleNamespace(role="assistant", content="旧回答"),
+    ]
+    store = SimpleNamespace(history=lambda: list(messages))
+    memory = ConversationMemory(store, actions, "s1")
+    rt = make_runtime(store_dir=tmp_path)
+    rt.actions = actions
+    rt.agent = SimpleNamespace(core=SimpleNamespace(memory=memory))
+
+    out = collect(rt)
+    run(rt.handle({"type": "message.retract", "index": 0}))
+    assert any(m["type"] == "message.updated" and m["kind"] == "retract" for m in out)
+    assert memory.history() == []
+
+    # 编辑：旧区间隐藏，新任务按新文本调度
+    actions.add(session_id="s1", kind="retract", hide_from=0, hide_until=0)
+    captured = {}
+    async def fake_start(task_id, run_id, text):
+        captured.update(task_id=task_id, run_id=run_id, text=text)
+    rt.start_task = fake_start  # type: ignore[method-assign]
+    out.clear()
+    run(rt.handle({"type": "message.edit", "index": 0, "input": "新问题",
+                   "task_id": "t9", "run_id": "r9"}))
+    assert any(m["type"] == "message.updated" and m["kind"] == "edit" for m in out)
+    assert captured["text"] == "新问题"
+    assert any(r["kind"] == "edit" for r in actions.list("s1"))
+
+
+def test_share_export_writes_local_file(tmp_path):
+    """分享只写本地 md/html，不生成公网链接。"""
+    rt = make_runtime(store_dir=tmp_path)
+    out = collect(rt)
+    target = tmp_path / "share.md"
+    run(rt.handle({"type": "share.export", "path": str(target),
+                   "content": "# 分享\n\n内容", "count": 2}))
+    assert target.read_text(encoding="utf-8") == "# 分享\n\n内容"
+    exported = next(m for m in out if m["type"] == "share.exported")
+    assert exported["count"] == 2
+
+
+def test_archive_state_includes_evolution_reports(tmp_path, monkeypatch):
+    """星图节点必须带进化审计与证据链，不能只显示一个光溜溜的星球。"""
+    from yoai.evolution import EvolutionArchive, EvolutionReportStore, ExpertSpec
+
+    monkeypatch.setattr(yoai_runtime, "_data_dir", lambda: tmp_path)
+    archive = EvolutionArchive(tmp_path / "evolution" / "evolution.json")
+    root = archive.create_root("root", ExpertSpec(prompt_suffix="通用"))
+    store = EvolutionReportStore(tmp_path)
+    store.add({"id": "rep1", "evidence_id": "e1", "triggered": True,
+               "cause": "capability", "new_node_id": root.id,
+               "reason": "候选已创建", "created_at": "2026-11-26T00:00:00Z"})
+    rt = make_runtime(store_dir=tmp_path)
+    rt.evolution_reports = store
+
+    state = rt._archive_state()
+    node = next(n for n in state["nodes"] if n["id"] == root.id)
+    assert node["reports"][0]["id"] == "rep1"
+    assert node["evidence"] == []

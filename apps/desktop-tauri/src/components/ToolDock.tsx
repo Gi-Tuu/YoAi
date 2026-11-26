@@ -8,11 +8,10 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { SideCards } from "./SideCards";
 import { ipc } from "../lib/ipc";
-import type { FileEntry, RuntimeMsg } from "../types/ipc";
+import type { FileEntry, RuntimeMsg, SnapshotMsg } from "../types/ipc";
 import type { RunState } from "../hooks/useTaskStream";
-
-type Tool = "browser" | "terminal" | "files";
 
 interface TerminalEntry {
   runId: string;
@@ -20,6 +19,7 @@ interface TerminalEntry {
 }
 
 interface Props {
+  snap?: SnapshotMsg | null;
   runs: Map<string, RunState>;
   ready: boolean;
   onRunCommand: (command: string) => string;
@@ -47,8 +47,8 @@ function safeUrl(raw: string): string | null {
   }
 }
 
-export function ToolDock({ runs, ready, onRunCommand, onError }: Props) {
-  const [open, setOpen] = useState<Tool | null>(null);
+export function ToolDock({ snap = null, runs, ready, onRunCommand, onError }: Props) {
+  const [filesOpen, setFilesOpen] = useState(false);
   const [notice, setNotice] = useState("");
 
   // 浏览器
@@ -87,10 +87,10 @@ export function ToolDock({ runs, ready, onRunCommand, onError }: Props) {
   }, [onError]);
 
   useEffect(() => {
-    if (open === "files" && ready) void ipc.listFiles(path).catch((e) => setNotice(String(e)));
+    if (filesOpen && ready) void ipc.listFiles(path).catch((e) => setNotice(String(e)));
     // path 变化由用户点击驱动，这里只在面板首次打开时拉一次根目录
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, ready]);
+  }, [filesOpen, ready]);
 
   const terminalLines = useMemo(() => terminal.map((entry) => {
     const run = runs.get(entry.runId);
@@ -122,116 +122,87 @@ export function ToolDock({ runs, ready, onRunCommand, onError }: Props) {
 
   const crumbs = path ? path.split("/").filter(Boolean) : [];
 
-  return (
-    <div className="tool-dock">
-      <div className="tool-dock-grid" aria-label="内置工具">
-        <button type="button" className={`dock-tile ${open === "browser" ? "active" : ""}`}
-                aria-expanded={open === "browser"} onClick={() => setOpen(open === "browser" ? null : "browser")}>
-          <span className="dock-icon">◎</span><span>浏览器</span>
-        </button>
-        <button type="button" className={`dock-tile ${open === "terminal" ? "active" : ""}`}
-                aria-expanded={open === "terminal"} onClick={() => setOpen(open === "terminal" ? null : "terminal")}>
-          <span className="dock-icon">›_</span><span>终端</span>
-        </button>
-        <button type="button" className={`dock-tile ${open === "files" ? "active" : ""}`}
-                aria-expanded={open === "files"} onClick={() => setOpen(open === "files" ? null : "files")}>
-          <span className="dock-icon">▤</span><span>查看文件</span>
-        </button>
+  const toolCards = [
+    { id: "browser", title: "浏览器", panelTitle: "内置浏览器", icon: "◎", width: 400, height: 368, body: (
+      <div className="tool-browser">
+        <div className="tool-urlbar">
+          <input value={urlDraft} onChange={(e) => setUrlDraft(e.target.value)}
+                 onKeyDown={(e) => {
+                   if (e.key !== "Enter") return;
+                   const next = safeUrl(urlDraft);
+                   if (next) { setUrl(next); setFrameKey((n) => n + 1); }
+                   else setNotice("请输入 http:// 或 https:// 开头的网址");
+                 }}
+                 placeholder="https://…" aria-label="网址" />
+          <button type="button" onClick={() => {
+            const next = safeUrl(urlDraft);
+            if (next) { setUrl(next); setFrameKey((n) => n + 1); }
+            else setNotice("请输入 http:// 或 https:// 开头的网址");
+          }}>打开</button>
+          <button type="button" disabled={!url}
+                  onClick={() => void ipc.openExternal(url).catch((e) => setNotice(String(e)))}>
+            系统打开
+          </button>
+        </div>
+        {url
+          ? <iframe key={frameKey} src={url} title="内置浏览器" className="tool-frame"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+          : <div className="tool-empty">输入网址后在这里打开。部分站点禁止内嵌，请用「系统打开」。</div>}
       </div>
-
-      {open && (
-        <section className="tool-panel" aria-label={{ browser: "内置浏览器", terminal: "终端", files: "查看文件" }[open]}>
-          <header>
-            <strong>{{ browser: "内置浏览器", terminal: "终端", files: "查看文件" }[open]}</strong>
-            <button type="button" className="tool-panel-close" aria-label="关闭" onClick={() => setOpen(null)}>×</button>
-          </header>
-
-          {notice && <div className="tool-notice">{notice}</div>}
-
-          {open === "browser" && (
-            <div className="tool-browser">
-              <div className="tool-urlbar">
-                <input value={urlDraft} onChange={(e) => setUrlDraft(e.target.value)}
-                       onKeyDown={(e) => {
-                         if (e.key !== "Enter") return;
-                         const next = safeUrl(urlDraft);
-                         if (next) { setUrl(next); setFrameKey((n) => n + 1); }
-                         else setNotice("请输入 http:// 或 https:// 开头的网址");
-                       }}
-                       placeholder="https://…" aria-label="网址" />
-                <button type="button" onClick={() => {
-                  const next = safeUrl(urlDraft);
-                  if (next) { setUrl(next); setFrameKey((n) => n + 1); }
-                  else setNotice("请输入 http:// 或 https:// 开头的网址");
-                }}>打开</button>
-                <button type="button" disabled={!url}
-                        onClick={() => void ipc.openExternal(url).catch((e) => setNotice(String(e)))}>
-                  系统打开
-                </button>
-              </div>
-              {url
-                ? <iframe key={frameKey} src={url} title="内置浏览器" className="tool-frame"
-                          sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
-                : <div className="tool-empty">输入网址后在这里打开。部分站点禁止内嵌，请用「系统打开」。</div>}
+    ) },
+    { id: "terminal", title: "终端", icon: "›_", width: 380, height: 300, body: (
+      <div className="tool-terminal">
+        <div className="tool-urlbar">
+          <input value={command} onChange={(e) => setCommand(e.target.value)}
+                 onKeyDown={(e) => { if (e.key === "Enter") submitCommand(); }}
+                 placeholder="要执行的命令（仍走审批）" aria-label="命令" />
+          <button type="button" disabled={!ready || !command.trim()} onClick={submitCommand}>执行</button>
+        </div>
+        <div className="tool-log">
+          {terminalLines.length === 0 && <div className="tool-empty">命令通过对话区审批后执行，输出会显示在这里。</div>}
+          {terminalLines.map((entry) => (
+            <div key={entry.runId} className="tool-log-entry">
+              <div className="tool-log-head">$ {entry.command} <span data-state={entry.state}>{entry.state}</span></div>
+              <pre>{entry.output || "等待执行结果…"}</pre>
             </div>
-          )}
-
-          {open === "terminal" && (
-            <div className="tool-terminal">
-              <div className="tool-urlbar">
-                <input value={command} onChange={(e) => setCommand(e.target.value)}
-                       onKeyDown={(e) => { if (e.key === "Enter") submitCommand(); }}
-                       placeholder="要执行的命令（仍走审批）" aria-label="命令" />
-                <button type="button" disabled={!ready || !command.trim()} onClick={submitCommand}>执行</button>
-              </div>
-              <div className="tool-log">
-                {terminalLines.length === 0 && <div className="tool-empty">命令通过对话区审批后执行，输出会显示在这里。</div>}
-                {terminalLines.map((entry) => (
-                  <div key={entry.runId} className="tool-log-entry">
-                    <div className="tool-log-head">$ {entry.command} <span data-state={entry.state}>{entry.state}</span></div>
-                    <pre>{entry.output || "等待执行结果…"}</pre>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {open === "files" && (
-            <div className="tool-files">
-              <div className="tool-pathbar">
-                <button type="button" title={root || "当前文件根目录"} onClick={() => goPath("")}>{label}</button>
-                {crumbs.map((part, i) => (
-                  <span key={`${part}-${i}`}>
-                    <span className="tool-sep">/</span>
-                    <button type="button" onClick={() => goPath(crumbs.slice(0, i + 1).join("/"))}>{part}</button>
-                  </span>
-                ))}
-              </div>
-              <div className="tool-tree">
-                {entries.length === 0 && <div className="tool-empty">这个目录是空的。</div>}
-                {entries.map((entry) => (
-                  <button type="button" key={entry.path} className="tool-entry"
-                          onClick={() => {
-                            if (entry.is_dir) goPath(entry.path);
-                            else {
-                              setContent(null);
-                              void ipc.readFile(entry.path).catch((e) => setNotice(String(e)));
-                            }
-                          }}>
-                    <span className="tool-entry-icon">{entry.is_dir ? "▸" : "·"}</span>{entry.name}
-                  </button>
-                ))}
-              </div>
-              {content && (
-                <div className="tool-file-content">
-                  <div className="tool-file-head">{content.path}{content.truncated ? " · 仅预览前 20 万字符" : ""}</div>
-                  <pre>{content.text}</pre>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-      )}
-    </div>
-  );
+          ))}
+        </div>
+      </div>
+    ) },
+    { id: "files", title: "查看文件", icon: "▤", width: 380, height: 368, body: (
+      <div className="tool-files">
+        <div className="tool-pathbar">
+          <button type="button" title={root || "当前文件根目录"} onClick={() => goPath("")}>{label}</button>
+          {crumbs.map((part, i) => (
+            <span key={`${part}-${i}`}>
+              <span className="tool-sep">/</span>
+              <button type="button" onClick={() => goPath(crumbs.slice(0, i + 1).join("/"))}>{part}</button>
+            </span>
+          ))}
+        </div>
+        <div className="tool-tree">
+          {entries.length === 0 && <div className="tool-empty">这个目录是空的。</div>}
+          {entries.map((entry) => (
+            <button type="button" key={entry.path} className="tool-entry"
+                    onClick={() => {
+                      if (entry.is_dir) goPath(entry.path);
+                      else {
+                        setContent(null);
+                        void ipc.readFile(entry.path).catch((e) => setNotice(String(e)));
+                      }
+                    }}>
+              <span className="tool-entry-icon">{entry.is_dir ? "▸" : "·"}</span>{entry.name}
+            </button>
+          ))}
+        </div>
+        {content && (
+          <div className="tool-file-content">
+            <div className="tool-file-head">{content.path}{content.truncated ? " · 仅预览前 20 万字符" : ""}</div>
+            <pre>{content.text}</pre>
+          </div>
+        )}
+      </div>
+    ) },
+  ];
+  return <SideCards snap={snap} extraCards={toolCards} onFilesOpen={setFilesOpen} toolNotice={notice} />;
 }

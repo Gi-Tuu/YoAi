@@ -174,3 +174,35 @@ def file_content(*, root: str, path: str, content: str,
         "root": root, "path": path, "content": content,
         "size": size, "truncated": truncated,
     }
+
+
+# ---- v1 追加（附件 / 消息动作 / 分享）----
+
+def attachment_ready(*, item: dict[str, Any]) -> dict[str, Any]:
+    """附件已登记并抽取文本（失败时 content 为空并带 detail）。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "attachment.ready", "attachment": item,
+    }
+
+
+def message_updated(*, kind: str, index: int, detail: str = "") -> dict[str, Any]:
+    """撤回 / 编辑 / 重新生成完成，前端应重新拉快照。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "message.updated",
+        "kind": kind, "index": index, "detail": detail,
+    }
+
+
+def share_exported(*, path: str, count: int) -> dict[str, Any]:
+    """会话/消息已导出到本地文件。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "share.exported",
+        "path": path, "count": count,
+    }
+
+
+def evolution_report(*, report: dict[str, Any]) -> dict[str, Any]:
+    """一次显式进化尝试的完整审计记录。"""
+    return {
+        "v": PROTOCOL_VERSION, "type": "evolution.report", "report": report,
+    }

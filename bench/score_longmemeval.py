@@ -34,15 +34,15 @@ def _core_env():
     src = os.environ.get("YAI_CORE_SRC")
     if src:
         return Path(src).expanduser() / ".env"
-    # 默认回退：先试项目父目录（E:\agent\.env），不存在则用绑定的 Core 目录。
-    # 历史上评分依赖环境变量 YAI_CORE_SRC，新 shell 未设时会误指向不存在的
-    # E:\agent\.env，导致 judge base_url 为空 → ValueError: unknown url type。
+    # 默认回退：先试项目父目录（<repo-parent>/.env），再用 YOAI_CORE_ROOT 指定的
+    # Core 根目录。历史上评分依赖 YAI_CORE_SRC，新 shell 未设时会误指向不存在的
+    # 父目录 .env，导致 judge base_url 为空 → ValueError: unknown url type。
     fallback = Path(__file__).resolve().parents[2] / ".env"
     if fallback.exists():
         return fallback
-    core_env = Path(r"E:\Competition\YAI Agent Core") / ".env"
-    if core_env.exists():
-        return core_env
+    core_root = os.environ.get("YOAI_CORE_ROOT")
+    if core_root and (Path(core_root) / ".env").exists():
+        return Path(core_root) / ".env"
     return fallback
 
 
@@ -78,13 +78,13 @@ def judge(prompt: str) -> tuple[bool, str]:
     env = read_env_file(CORE_ENV)
     base = env.get("OPENAI_BASE_URL", "").rstrip("/")
     key = env.get("OPENAI_API_KEY", "")
-    judge_model = JUDGE_MODEL
+    judge_model = os.environ.get("YOAI_JUDGE_MODEL", JUDGE_MODEL)
     # 环境变量覆盖（与 run_longmemeval_incremental.py 对称）：换网关时 judge 也跟着切。
-    # 三个变量必须同时设置才整体覆盖；YOAI_JUDGE_MODEL 单独覆盖模型 ID（网关模型名格式不同）。
+    # 三个变量必须同时设置才整体覆盖；YOAI_JUDGE_MODEL 可单独覆盖模型 ID
+    # （网关换到 spark-x2.6 后，旧 deepseek 模型名会报 no category route found）。
     if os.environ.get("YOAI_BASE_URL") and os.environ.get("YOAI_API_KEY"):
         base = os.environ["YOAI_BASE_URL"].rstrip("/")
         key = os.environ["YOAI_API_KEY"]
-        judge_model = os.environ.get("YOAI_JUDGE_MODEL", judge_model)
     payload = {
         "model": judge_model,
         "messages": [{"role": "user", "content": prompt}],
@@ -155,7 +155,8 @@ def main() -> int:
 
     for (entry, qtype, _), (label, raw) in zip(tasks, results):
         qid = entry["question_id"]
-        entry["autoeval_label"] = {"model": JUDGE_MODEL, "label": label, "raw": raw}
+        entry["autoeval_label"] = {"model": os.environ.get("YOAI_JUDGE_MODEL", JUDGE_MODEL),
+                                   "label": label, "raw": raw}
         logs.append(entry)
         by_type.setdefault(qtype, []).append(1 if label else 0)
         print(f"{qid}: {'yes' if label else 'no'}  ({raw[:20]!r})", flush=True)
@@ -165,8 +166,8 @@ def main() -> int:
     score = {
         "benchmark": "LongMemEval",
         "split": "oracle",
-        "judge_model": JUDGE_MODEL,
-        "judge_note": "官方 anscheck prompt 原样保留；judge 由 gpt-4o 替换为 deepseek（本地无 OpenAI key）；分数不可与官方榜单直接对比",
+        "judge_model": os.environ.get("YOAI_JUDGE_MODEL", JUDGE_MODEL),
+        "judge_note": "官方 anscheck prompt 原样保留；judge 替换为当前网关可用模型；分数不可与官方榜单直接对比",
         "n": n,
         "accuracy": round(total / n, 4) if n else 0.0,
         "by_type": {k: {"acc": round(sum(v) / len(v), 4), "n": len(v)} for k, v in by_type.items()},

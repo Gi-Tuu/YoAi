@@ -61,9 +61,10 @@ for _p in _candidates:
         sys.path.insert(0, str(_p))
 
 from protocol import (  # noqa: E402  (自举后导入)
-    PROTOCOL_VERSION, Seq, approval_request, archive_state, browser_opened, chat_msg,
-    chat_state, encode, error, event, file_changed, file_content, file_tree, final,
-    permission_state, ready, snapshot, status,
+    PROTOCOL_VERSION, Seq, approval_request, archive_state, attachment_ready,
+    browser_opened, chat_msg, chat_state, encode, error, event, file_changed,
+    file_content, file_tree, final, evolution_report, message_updated,
+    permission_state, ready, share_exported, snapshot, status,
 )
 
 
@@ -109,6 +110,9 @@ class Runtime:
         self.thinking_store: Any = None
         self.projects: Any = None          # ProjectStore（项目模式）
         self.file_changes: Any = None      # FileChangeStore（产物/改动记录）
+        self.actions: Any = None           # ConversationActions（撤回/编辑覆盖层）
+        self.attachments: Any = None       # 附件目录根
+        self.evolution_reports: Any = None # EvolutionReportStore（显式进化审计）
         self._write_lock = asyncio.Lock()
 
     # ---- 输出 ----
@@ -126,11 +130,16 @@ class Runtime:
         from yoai.session import SessionManager
         from yoai.project import ProjectStore
         from yoai.file_changes import FileChangeStore
+        from yoai.conversation_actions import ConversationActions, ConversationMemory
         from yai_core_sidecar_channel import make_sidecar_channel  # 本目录辅助
 
         data_dir = _data_dir()
         self.projects = ProjectStore(data_dir / "projects")
         self.file_changes = FileChangeStore(data_dir)
+        self.actions = ConversationActions(data_dir)
+        self.attachments = data_dir / "attachments"
+        from yoai.evolution import EvolutionReportStore
+        self.evolution_reports = EvolutionReportStore(data_dir)
         channel_cb = make_sidecar_channel(self._request_host)
         self.model_options = available_main_models()
         preferred = UserConfig(data_dir).load().get("desktop_model")
@@ -163,6 +172,7 @@ class Runtime:
             agent_kwargs=agent_kwargs(data_dir, channel=channel_cb),
             agent_kwargs_for_session=kwargs_for_session,
             memory_dir_for_session=memory_dir_for_session,
+            memory_for_session=lambda sid, store: ConversationMemory(store, self.actions, sid),
         )
         # 首次启动（数据目录为空）必须建初始会话——旧端 app.py main() 语义，
         # 否则 current_agent() 会 KeyError，新用户第一句话就失败。
@@ -242,7 +252,12 @@ class Runtime:
         current = self.sessions.current
         history: list[dict[str, Any]] = []
         try:
-            for message in self.agent.core.memory.history():
+            memory = self.agent.core.memory
+            pairs = (memory.history_with_indices() if hasattr(memory, "history_with_indices")
+                     else list(enumerate(memory.history())))
+            messages = [m for _, m in pairs]
+            timestamps = self.sessions.history_timestamps(current.id, messages) if current else []
+            for pos, (index, message) in enumerate(pairs):
                 context.add(message)
                 role = getattr(message, "role", "")
                 if role not in ("user", "assistant"):
@@ -255,7 +270,10 @@ class Runtime:
                     )
                 if role == "assistant":
                     content = clean_final_text(str(content))
-                history.append({"role": role, "text": str(content)})
+                item = {"role": role, "text": str(content), "idx": index}
+                if timestamps and pos < len(timestamps):
+                    item["at"] = timestamps[pos]
+                history.append(item)
         except Exception as exc:  # noqa: BLE001
             _log(f"history load failed: {exc}")
         facts: dict[str, str] = {}
@@ -514,6 +532,10 @@ class Runtime:
                 "model_tier": str(getattr(node.spec, "model_tier", "") or ""),
                 "diff": str(getattr(node, "diff", "") or ""),
                 "evidence_count": len(getattr(node, "evidence", []) or []),
+                "evidence": [e.to_dict() if hasattr(e, "to_dict") else dict(e)
+                             for e in (getattr(node, "evidence", []) or [])],
+                "reports": (self.evolution_reports.list(node.id)
+                            if self.evolution_reports is not None else []),
                 "created_at": str(getattr(node, "created_at", "")),
                 "prompt_suffix": str(getattr(node.spec, "prompt_suffix", "") or ""),
             })
@@ -661,6 +683,19 @@ class Runtime:
                     self.evidence_store.add(evidence)
                     attribution = AttributionEngine(self.evidence_store).attribute(evidence)
                     self.evidence_store.add_attribution(attribution)
+
+                    # 显式进化开关：默认关闭，避免每次对话都长分支。
+                    # 开启后也只在证据落盘成功后旁路尝试，失败不影响任务结果。
+                    if os.environ.get("YOAI_EVOLUTION", "0") == "1":
+                        from yoai.evolution import EvolutionArchive, EvolutionEngine
+                        archive = EvolutionArchive(_data_dir() / "evolution" / "evolution.json")
+                        engine = EvolutionEngine(archive, self.evidence_store)
+                        report = engine.evolve(evidence.id)
+                        payload = report.to_dict()
+                        if self.evolution_reports is not None:
+                            self.evolution_reports.add(payload)
+                        await self.send(evolution_report(report=payload))
+                        await self.send(self._archive_state())
                 except Exception as exc:  # noqa: BLE001
                     _log(f"evidence record failed: {exc}")
 
@@ -896,6 +931,114 @@ class Runtime:
                         size=target.stat().st_size, truncated=truncated))
             except (ProjectError, OSError) as exc:
                 await self.send(error("file", str(exc)))
+        elif typ in ("attachment.prepare", "attachment.remove"):
+            # 附件只登记到本地附件目录，不自动执行、不外传；文本类抽取进任务上下文。
+            import shutil
+            import uuid
+            sid = self._session_id() or "shared"
+            base = (self.attachments or _data_dir() / "attachments") / sid
+            base.mkdir(parents=True, exist_ok=True)
+            if typ == "attachment.remove":
+                rid = str(cmd.get("id", ""))
+                for candidate in base.glob(f"{rid}_*"):
+                    try:
+                        candidate.unlink()
+                    except OSError:
+                        pass
+                await self._push_snapshot()
+                return True
+            raw_path = str(cmd.get("path", "")).strip()
+            if raw_path.lower().startswith("file://") or not raw_path:
+                await self.send(error("file", "附件只接受本地文件路径"))
+                return True
+            source = Path(raw_path).expanduser()
+            try:
+                if not source.is_file():
+                    raise ValueError("附件路径不是文件")
+                size = source.stat().st_size
+                if size > 10 * 1024 * 1024:
+                    raise ValueError("附件超过 10MB 上限")
+                rid = uuid.uuid4().hex[:10]
+                target = base / f"{rid}_{source.name}"
+                shutil.copyfile(source, target)
+                text_ext = {".txt", ".md", ".py", ".js", ".ts", ".tsx", ".json", ".csv",
+                            ".html", ".css", ".yml", ".yaml", ".toml", ".log"}
+                text = ""
+                truncated = False
+                if source.suffix.lower() in text_ext:
+                    with target.open("rb") as handle:
+                        raw = handle.read(200_001)
+                    truncated = len(raw) > 200_000
+                    text = raw[:200_000].decode("utf-8", errors="replace")
+                await self.send(attachment_ready(item={
+                    "id": rid, "name": source.name, "size": size,
+                    "path": str(target), "content": text, "truncated": truncated,
+                }))
+            except (OSError, ValueError) as exc:
+                await self.send(error("file", f"附件登记失败：{exc}"))
+        elif typ in ("message.retract", "message.edit", "task.regenerate"):
+            # 软删除 + 分支：隐藏 Core 历史的一段区间，原始记录仍留 SQLite 可审计。
+            from yoai.conversation_actions import content_hash
+            sid = self._session_id()
+            memory = getattr(getattr(self.agent, "core", None), "memory", None)
+            if self.actions is None or memory is None:
+                await self.send(error("message", "消息动作尚未初始化"))
+                return True
+            full = (memory.history_full() if hasattr(memory, "history_full")
+                    else list(memory.history()))
+            index = int(cmd.get("index", -1))
+            if index < 0:
+                # 新任务还没进历史时用 -1：按内容找最后一条匹配消息。
+                needle = str(cmd.get("input", "")).strip()
+                roles = ("assistant",) if typ == "task.regenerate" else ("user",)
+                matches = [i for i, m in enumerate(full)
+                           if getattr(m, "role", "") in roles
+                           and (not needle or needle == str(getattr(m, "content", "")))]
+                index = matches[-1] if matches else -1
+            if index < 0 or index >= len(full):
+                await self.send(error("message", "消息序号无效"))
+                return True
+            text = str(cmd.get("input", "") or getattr(full[index], "content", ""))
+            if typ == "message.retract":
+                end = index + 1
+                for j in range(index + 1, len(full)):
+                    if getattr(full[j], "role", "") == "user":
+                        break
+                    end = j + 1
+                self.actions.add(session_id=sid, kind="retract", hide_from=index,
+                                 hide_until=end, text_hash=content_hash(text))
+                await self._push_snapshot()
+                await self.send(message_updated(kind="retract", index=index))
+                return True
+            task_id = str(cmd.get("task_id", "")) or f"t{index}"
+            run_id = str(cmd.get("run_id", "")) or f"r{index}"
+            if typ == "message.edit":
+                if not str(cmd.get("input", "")).strip():
+                    await self.send(error("message", "编辑后的内容不能为空"))
+                    return True
+                self.actions.add(session_id=sid, kind="edit", hide_from=index,
+                                 hide_until=len(full),
+                                 text_hash=content_hash(str(cmd.get("input", ""))))
+            else:
+                self.actions.add(session_id=sid, kind="regenerate", hide_from=index,
+                                 hide_until=len(full), text_hash=content_hash(text))
+            await self._push_snapshot()
+            await self.send(message_updated(
+                kind="edit" if typ == "message.edit" else "regenerate", index=index))
+            await self.start_task(task_id, run_id, text)
+        elif typ == "share.export":
+            path = Path(str(cmd.get("path", "")).strip()).expanduser()
+            content = str(cmd.get("content", ""))
+            count = int(cmd.get("count", 1))
+            if path.suffix.lower() not in (".md", ".html"):
+                await self.send(error("share", "只能导出 .md 或 .html"))
+                return True
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                await self.send(share_exported(path=str(path), count=count))
+            except OSError as exc:
+                await self.send(error("share", f"导出失败：{exc}"))
         elif typ == "shutdown":
             for task in list(self.tasks.values()):
                 task.cancel()

@@ -137,6 +137,43 @@ export function GalaxyPage() {
             <div className="node-line">模型档位：{sel.model_tier || "（默认）"}</div>
             <div className="node-line">修改差异：{sel.diff || "（无）"}</div>
             <div className="node-line">证据条数：{sel.evidence_count}</div>
+            {(sel.reports?.length ?? 0) > 0 && (
+              <div className="evo-reports">
+                <div className="comms-label">进化审计</div>
+                {sel.reports!.map((report) => (
+                  <div key={report.id} className="evo-report">
+                    <div>{report.created_at} · {report.cause} · {report.triggered ? "已尝试" : "未触发"}</div>
+                    <div>{report.reason}</div>
+                    {report.promotion && (
+                      <div>晋升：{report.promotion.promoted ? "是" : "否"} — {report.promotion.reason}</div>
+                    )}
+                    {report.promotion?.report && (
+                      <div className="evo-boundaries">
+                        结论：{report.promotion.report.verdict} · 样本 {report.promotion.report.total_samples}
+                        {report.promotion.report.boundaries.map((b) => (
+                          <div key={b.capability_tag}>
+                            {b.capability_tag}：子 {b.node_rate.toFixed(2)}
+                            [{b.node_ci.map((v) => v.toFixed(2)).join(",")}] / 父 {b.parent_rate.toFixed(2)}
+                            [{b.parent_ci.map((v) => v.toFixed(2)).join(",")}]
+                            {b.sample_enough ? "" : " · 样本不足"}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {(sel.evidence?.length ?? 0) > 0 && (
+              <div className="evo-evidence">
+                <div className="comms-label">证据索引</div>
+                {sel.evidence!.slice(-8).map((e) => (
+                  <div key={e.id} className="evo-evidence-row">
+                    {e.kind} · {e.outcome} · {e.task_fingerprint || "无指纹"}
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="node-line">创建时间：{sel.created_at || "—"}</div>
             {sel.prompt_suffix && <div className="node-line">能力提示：{sel.prompt_suffix}</div>}
           </div>

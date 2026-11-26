@@ -9,7 +9,6 @@ import { ipc } from "./lib/ipc";
 import { useTaskStream, type RunState } from "./hooks/useTaskStream";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { Markdown } from "./components/Markdown";
-import { SideCards } from "./components/SideCards";
 import { ToolDock } from "./components/ToolDock";
 import { ProjectPanel } from "./components/ProjectPanel";
 import { Artifacts, Changes } from "./components/FileChanges";
@@ -19,17 +18,50 @@ import { WindowControls } from "./components/WindowControls";
 import { CommsPage } from "./components/CommsPage";
 import { GalaxyPage } from "./components/GalaxyPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
-import type { RuntimeMsg, SnapshotMsg, ThinkingRecord, PermissionLevel } from "./types/ipc";
+import { MessageActions } from "./components/MessageActions";
+import { open as openFile, save as saveFile } from "@tauri-apps/plugin-dialog";
+import type { AttachmentInfo, RuntimeMsg, SnapshotMsg, ThinkingRecord, PermissionLevel } from "./types/ipc";
 
 const newId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+const messageClock = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+});
+
+function MessageTime({ at }: { at?: string | number }) {
+  if (at === undefined) return null;
+  const date = new Date(at);
+  if (!Number.isFinite(date.getTime())) return null;
+  return <time className="run-time" dateTime={date.toISOString()}
+               title={date.toLocaleString("zh-CN")}>{messageClock.format(date)}</time>;
+}
+
+function UserMessage({ text, at, idx, onCopy, onShare, onEdit, onRetract }: {
+  text: string; at?: string | number; idx?: number;
+  onCopy: (text: string) => void; onShare: (text: string) => void;
+  onEdit?: (index: number, text: string) => void;
+  onRetract?: (index: number) => void;
+}) {
+  return <div className="user-turn">
+    <MessageTime at={at} />
+    <div className="user-msg">{text}</div>
+    <MessageActions role="user" onCopy={() => onCopy(text)} onShare={() => onShare(text)}
+      onEdit={onEdit ? () => onEdit(idx ?? -1, text) : undefined}
+      onRetract={onRetract && idx !== undefined ? () => onRetract(idx) : undefined} />
+  </div>;
+}
+
 /** 旧端 _clean_final_text 已在 runtime 完成；这里只兜底空文本。 */
 /** 历史消息：带可展开的 thinking（从 YoAi 侧持久化记录按提问文本对齐）。 */
-function HistoryRun({ text, thinking }: { text: string; thinking?: ThinkingRecord }) {
+function HistoryRun({ text, thinking, at, idx, onCopy, onShare, onRegenerate }: {
+  text: string; thinking?: ThinkingRecord; at?: string; idx?: number;
+  onCopy: (text: string) => void; onShare: (text: string) => void;
+  onRegenerate: (index: number, text: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <article className="chat-run history-run">
-      <header className="run-head"><span className="who">YoAi</span></header>
+      <header className="run-head"><span className="who">YoAi</span><MessageTime at={at} /></header>
       {thinking?.text?.trim() && (
         <div className="history-think">
           <button className="think-link" onClick={() => setOpen((v) => !v)}>
@@ -39,12 +71,16 @@ function HistoryRun({ text, thinking }: { text: string; thinking?: ThinkingRecor
         </div>
       )}
       <div className="final-answer"><Markdown text={text} /></div>
+      <MessageActions role="assistant" onCopy={() => onCopy(text)} onShare={() => onShare(text)}
+        onRegenerate={idx === undefined ? undefined : () => onRegenerate(idx, text)} />
     </article>
   );
 }
 
-function ChatRun({ run, streaming, onApproval }: {
+function ChatRun({ run, streaming, onApproval, onCopy, onShare, onRegenerate }: {
   run: RunState; streaming: boolean; onApproval: (runId: string, allow: boolean) => void;
+  onCopy: (text: string) => void; onShare: (text: string) => void;
+  onRegenerate: (index: number, text: string) => void;
 }) {
   const rounds = useMemo(() => [...run.streamText.entries()].sort((a, b) => a[0] - b[0]), [run.streamText]);
   // 静默失败修复（对齐旧端 _task_had_error）：报错后的"完成"必须标出来
@@ -59,7 +95,7 @@ function ChatRun({ run, streaming, onApproval }: {
         <span className="state" data-state={hadError && run.state === "done" ? "failed" : run.state}>
           {stateText}
         </span>
-        <span className="run-time">{new Date(run.startedAt).toLocaleTimeString("zh-CN")}</span>
+        <MessageTime at={run.endedAt ?? run.startedAt} />
       </header>
 
       <ProcessPanel events={run.events} thinking={run.thinking} />
@@ -82,6 +118,11 @@ function ChatRun({ run, streaming, onApproval }: {
       ))}
 
       {run.finalText && <div className="final-answer"><Markdown text={run.finalText} /></div>}
+      {!streaming && run.finalText && (
+        <MessageActions role="assistant" onCopy={() => onCopy(run.finalText)}
+          onShare={() => onShare(run.finalText)}
+          onRegenerate={() => onRegenerate(-1, run.input)} />
+      )}
 
       {run.approval && (
         <div className="approval-box">
@@ -110,6 +151,7 @@ function useTheme() {
 export default function App() {
   const [msgs, setMsgs] = useState<RuntimeMsg[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [floating, setFloating] = useState(false);
@@ -124,6 +166,7 @@ export default function App() {
   const [dialog, setDialog] = useState<
     | { kind: "rename"; sessionId: string; initial: string }
     | { kind: "delete"; sessionId: string; name: string }
+    | { kind: "edit"; index: number; initial: string }
     | null
   >(null);
   const [theme, toggleTheme] = useTheme();
@@ -152,6 +195,19 @@ export default function App() {
       setMsgs((prev) => [...prev, m]);   // 所有 runtime 消息进入消费队列
       if (m.type === "ready") setReady(true);
       if (m.type === "error" && (m.stage === "startup" || (m.stage === "protocol" && !m.run_id))) setErr(m.message);
+      if (m.type === "attachment.ready") {
+        setAttachments((prev) => [...prev, m.attachment]);
+      }
+      if (m.type === "message.updated") {
+        setErr(m.kind === "retract" ? "已撤回该提问及其回答" :
+          m.kind === "edit" ? "已按编辑内容重新生成" : "已重新生成回答");
+      }
+      if (m.type === "share.exported") {
+        setErr(`已导出到 ${m.path}`);
+      }
+      if (m.type === "error" && ["file", "message", "share", "browser"].includes(m.stage)) {
+        setErr(m.message);
+      }
       if (m.type === "permission.state") {
         setPermission({ level: m.level, description: m.description });
       }
@@ -181,13 +237,18 @@ export default function App() {
   const send = useCallback(() => {
     const text = input.trim();
     if (!text || !ready) return;
+    const attachmentBlock = attachments.map((a) =>
+      `[附件：${a.name}]\n${a.content.trim() || "(二进制附件，已登记到本地，内容未抽取)"}`
+    ).join("\n\n");
+    const finalInput = attachmentBlock ? `${text}\n\n${attachmentBlock}` : text;
     const taskId = newId("t"); const runId = newId("r");
-    beginRun(taskId, runId, text);
+    beginRun(taskId, runId, finalInput);
     setMsgs([]);   // 事件数组有界：新一轮从零开始（run 视图保留，历史由 snapshot 承担）
     stickBottomRef.current = true;
     requestAnimationFrame(() => scrollToBottom(true));   // 发消息跳到底部
-    void ipc.startTask(taskId, runId, text).catch((e) => setErr(String(e)));
+    void ipc.startTask(taskId, runId, finalInput).catch((e) => setErr(String(e)));
     setInput("");
+    setAttachments([]);
   }, [input, ready, beginRun, scrollToBottom]);
 
   // 流式 token 到达时跟随底部（用户在顶部看历史时不打扰）
@@ -208,6 +269,74 @@ export default function App() {
     stickBottomRef.current = true;
     void ipc.startTask(taskId, runId, input).catch((e) => setErr(String(e)));
     return runId;
+  }, [beginRun]);
+
+  // ---- 消息常规操作：复制 / 分享 / 附件 / 撤回 / 编辑 / 重新生成 ----
+  const copyText = useCallback(async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const area = document.createElement("textarea");
+        area.value = text; document.body.appendChild(area); area.select();
+        document.execCommand("copy"); area.remove();
+      }
+      setErr("已复制到剪贴板");
+    } catch (e) { setErr(`复制失败：${String(e)}`); }
+  }, []);
+
+  const exportText = useCallback(async (text: string, count: number, defaultName: string) => {
+    try {
+      const picked = await saveFile({
+        defaultPath: defaultName,
+        filters: [{ name: "Markdown", extensions: ["md"] }, { name: "HTML", extensions: ["html"] }],
+      });
+      if (!picked) return;
+      const path = String(picked);
+      const payload = path.toLowerCase().endsWith(".html")
+        ? `<!doctype html><meta charset="utf-8"><title>YoAi 分享</title><pre>${text
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>`
+        : text;
+      await ipc.shareExport(path, payload, count);
+    } catch (e) { setErr(`导出失败：${String(e)}`); }
+  }, []);
+
+  const shareSingle = useCallback((text: string) => {
+    void exportText(`# YoAi 消息\n\n${text}`, 1, "yoai-message.md");
+  }, [exportText]);
+  const shareConversation = useCallback(() => {
+    const lines = (snap?.history ?? []).map((h) =>
+      `**${h.role === "user" ? "我" : "YoAi"}**：\n\n${h.text}`);
+    void exportText(lines.join("\n\n---\n\n"), lines.length, "yoai-conversation.md");
+  }, [snap, exportText]);
+
+  const pickAttachment = useCallback(async () => {
+    try {
+      const picked = await openFile({
+        multiple: false, title: "选择附件",
+        filters: [{ name: "常用文件", extensions: ["txt", "md", "py", "js", "ts", "json", "csv", "html", "css", "yml", "yaml", "toml", "log", "pdf", "png", "jpg", "jpeg", "gif"] }],
+      });
+      if (picked && typeof picked === "string") await ipc.prepareAttachment(picked);
+    } catch (e) { setErr(`添加附件失败：${String(e)}`); }
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    void ipc.removeAttachment(id).catch((e) => setErr(String(e)));
+  }, []);
+
+  const startEdit = useCallback((index: number, initial: string) => {
+    setDialog({ kind: "edit", index, initial });
+  }, []);
+
+  const retract = useCallback((index: number) => {
+    void ipc.retractMessage(index).catch((e) => setErr(String(e)));
+  }, []);
+
+  const regenerate = useCallback((index: number, input: string) => {
+    const taskId = newId("t"); const runId = newId("r");
+    beginRun(taskId, runId, input);
+    void ipc.regenerate(index, input, taskId, runId).catch((e) => setErr(String(e)));
   }, [beginRun]);
 
   const active = runs.get(activeRunId);
@@ -352,20 +481,26 @@ export default function App() {
               <div className="chat-scroll" ref={chatScrollRef} onScroll={onChatScroll}>
                 {/* 历史消息（当前会话持久化历史） */}
                 {(snap?.history ?? []).map((h, i, arr) => {
-                  if (h.role === "user") return <div key={`h${i}`} className="user-msg">{h.text}</div>;
+                  if (h.role === "user") return <UserMessage key={`h${i}`} text={h.text} at={h.at}
+                    idx={h.idx} onCopy={copyText} onShare={shareSingle}
+                    onEdit={startEdit} onRetract={retract} />;
                   // 对齐 thinking：找最近一条用户提问匹配该记录的 input
                   const prevUser = [...arr.slice(0, i)].reverse().find((m) => m.role === "user");
                   const think = (snap?.thinking_log ?? []).find(
                     (t) => t.input && prevUser && t.input.trim() === prevUser.text.trim());
-                  return <HistoryRun key={`h${i}`} text={h.text} thinking={think} />;
+                  return <HistoryRun key={`h${i}`} text={h.text} thinking={think} at={h.at}
+                    idx={h.idx} onCopy={copyText} onShare={shareSingle} onRegenerate={regenerate} />;
                 })}
                 {runList.length === 0 && (snap?.history ?? []).length === 0 && (
                   <div className="empty">输入一个任务，开始与 YoAi 对话。</div>
                 )}
                 {runList.map((run) => (
                   <div key={run.runId}>
-                    <div className="user-msg">{run.input}</div>
+                    <UserMessage text={run.input} at={run.startedAt}
+                      onCopy={copyText} onShare={shareSingle}
+                      onEdit={startEdit} />
                     <ChatRun run={run} streaming={run.runId === activeRunId}
+                             onCopy={copyText} onShare={shareSingle} onRegenerate={regenerate}
                              onApproval={(runId, allow) => {
                                clearApproval(runId);   // 点了立即消失
                                void ipc.replyApproval(run.taskId, run.runId, allow)
@@ -377,6 +512,10 @@ export default function App() {
 
               <div className="composer">
                 <div className="composer-toolbar">
+                  <button type="button" className="attach-btn" title="添加附件"
+                          onClick={() => void pickAttachment()}>＋ 附件</button>
+                  <button type="button" className="attach-btn" title="导出当前会话"
+                          onClick={shareConversation}>分享会话</button>
                   <label className="perm-control" title={permission.description}>
                     <span>权限</span>
                     <select value={permission.level}
@@ -391,6 +530,17 @@ export default function App() {
                     </select>
                   </label>
                 </div>
+                {attachments.length > 0 && (
+                  <div className="attachment-chips">
+                    {attachments.map((a) => (
+                      <span key={a.id} className="attachment-chip" title={a.path}>
+                        📎 {a.name}
+                        <button type="button" aria-label={`移除附件 ${a.name}`}
+                                onClick={() => removeAttachment(a.id)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="composer-field">
                   <div className="context-model" title={`${contextLabel} · ${snap?.model ?? "模型"}`}>
                     <div className="context-track" role="meter" aria-valuemin={0} aria-valuemax={100}
@@ -417,8 +567,7 @@ export default function App() {
               </div>
             </div>
             <div className="right-rail">
-              <SideCards snap={snap} />
-              <ToolDock runs={runs} ready={ready} onRunCommand={runTerminalCommand} onError={setErr} />
+              <ToolDock snap={snap} runs={runs} ready={ready} onRunCommand={runTerminalCommand} onError={setErr} />
             </div>
           </main>
         )}
@@ -437,6 +586,18 @@ export default function App() {
                      detail="本地历史文件会保留。" okLabel="删除"
                      onCancel={() => setDialog(null)}
                      onOk={() => { void ipc.deleteSession(dialog.sessionId); setDialog(null); }} />
+      )}
+      {dialog?.kind === "edit" && (
+        <ModalInput title="编辑提问" placeholder="修改后的提问" initial={dialog.initial}
+                    onCancel={() => setDialog(null)}
+                    onOk={(text) => {
+                      if (!text.trim()) return;
+                      const taskId = newId("t"); const runId = newId("r");
+                      beginRun(taskId, runId, text);
+                      void ipc.editMessage(dialog.index, text, taskId, runId)
+                        .catch((e) => setErr(String(e)));
+                      setDialog(null);
+                    }} />
       )}
     </div>
   );

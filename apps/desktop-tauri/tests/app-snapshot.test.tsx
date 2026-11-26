@@ -90,8 +90,8 @@ describe("历史消息 thinking 显示", () => {
     const withThink: SnapshotMsg = {
       ...snap,
       history: [
-        { role: "user", text: "记住我叫小明" },
-        { role: "assistant", text: "好的，已记住。" },
+        { role: "user", text: "记住我叫小明", at: "2026-11-25T12:00:00Z" },
+        { role: "assistant", text: "好的，已记住。", at: "2026-11-25T12:00:04Z" },
       ],
       thinking_log: [{
         run_id: "r1", session_id: "s1", at: "2026-11-25T12:00:00",
@@ -105,6 +105,10 @@ describe("历史消息 thinking 显示", () => {
       emit(withThink);
       await new Promise((r) => setTimeout(r, 50));
     });
+    expect(screen.getByText("记住我叫小明").closest(".user-turn")?.querySelector("time")?.dateTime)
+      .toBe("2026-11-25T12:00:00.000Z");
+    expect(screen.getByText("好的，已记住。").closest(".history-run")?.querySelector("time")?.dateTime)
+      .toBe("2026-11-25T12:00:04.000Z");
     const link = screen.getByText(/查看思考过程/);
     expect(link).toBeTruthy();
     // 默认折叠，点开展示正文
@@ -134,7 +138,7 @@ describe("审批弹窗交互（hook 级）", () => {
 describe("项目模式 UI", () => {
   it("项目列表与创建入口渲染；项目会话显示当前项目", async () => {
     const { ProjectPanel } = await import("../src/components/ProjectPanel");
-    const projects = [{ id: "p1", name: "我的项目", path: "C:/proj", created_at: "" }];
+    const projects = [{ id: "p1", name: "我的项目", path: "<project-path>", created_at: "" }];
     const sessions = [{ id: "s1", name: "会话1", mode: "project" as const, project_id: "p1" }];
     render(<ProjectPanel projects={projects} sessions={sessions}
            currentSessionId="s1" ready={true} busy={false} onError={() => {}} />);

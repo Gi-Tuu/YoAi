@@ -174,6 +174,21 @@
 `file.content{root,path,content,size,truncated}`；错误阶段新增 `file`/`browser`。
 终端面板不新增命令——命令作为普通 `task.start` 交给 YoAi 调 `shell_run`，审批沿用既有通道。
 
+### v1 追加（附件 / 消息动作 / 分享）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `attachment.prepare` | `path` | 复制本地文件到 `<data_dir>/attachments/<session>/`，文本类抽取进上下文，回 `attachment.ready` |
+| `attachment.remove` | `id` | 发送前移除登记的附件文件 |
+| `message.retract` | `index` | 撤回用户消息及其回答：写隐藏区间，回 `message.updated` + `snapshot` |
+| `message.edit` | `index`,`input`,`task_id`,`run_id` | 隐藏旧分支并按新文本发新任务 |
+| `task.regenerate` | `index`,`input`,`task_id`,`run_id` | 隐藏上一条助手回答并重跑 |
+| `share.export` | `path`,`content`,`count` | 导出本地 `.md`/`.html`，回 `share.exported` |
+
+新消息：`attachment.ready{attachment}`、`message.updated{kind,index,detail}`、
+`share.exported{path,count}`；`snapshot.history[]` 追加 `idx`（原始历史序号）供动作定位。
+错误阶段新增 `message`/`share`。撤回/编辑采用软删除+分支，原始 Core 历史不物理删除。
+
 ### 行为约定
 
 1. `task` 事件序列规则不变；`snapshot` 与 run 事件流相互独立。

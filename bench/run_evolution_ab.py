@@ -70,19 +70,19 @@ TIME_TOOLS = {"events_between", "facts_by_tag", "list_facts", "all_topics"}
 BASIC_TOOLS = {"list_facts", "recall_fact"}   # 父版本/弱配置：只有基础查询
 
 _ROOT_SPEC = ExpertSpec(
-    strategy_bias="direct", tools=(),   # 空=全部工具（向后兼容）
+    strategy_bias="direct", tools=tuple(sorted(ALL_MEMORY_TOOLS)),
     prompt_suffix="你是通用助手。用可用工具查记忆后简洁回答。",
     capability_tags=(),
 )
 _EXPERTS: dict[str, ExpertSpec] = {
     "memory_expert": ExpertSpec(
-        strategy_bias="direct", tools=tuple(sorted(TIME_TOOLS)),
-        prompt_suffix="你擅长时间推理。用 events_between 查时间范围，引用具体日期回答。",
+        strategy_bias="direct", tools=tuple(sorted(ALL_MEMORY_TOOLS)),
+        prompt_suffix="你擅长时间推理。先按时间范围定位事件，再引用具体日期回答。",
         capability_tags=("memory", "temporal"),
     ),
     "research_expert": ExpertSpec(
-        strategy_bias="direct", tools=tuple(sorted(AGGREGATE_TOOLS)),
-        prompt_suffix="你擅长跨会话聚合。用 summarize_theme/all_topics 取全部事件后汇总。",
+        strategy_bias="direct", tools=tuple(sorted(ALL_MEMORY_TOOLS)),
+        prompt_suffix="你擅长跨会话聚合。先列全部主题，再汇总相关事件后回答。",
         capability_tags=("multi_session", "research", "aggregation"),
     ),
 }
@@ -187,6 +187,27 @@ class FixedRootRouter(ExpertRouter):
         return d
 
 
+class ForcedExpertRouter(ExpertRouter):
+    """父子成对验证：强制按指定节点执行（父节点 retired 也要能跑）。"""
+
+    def __init__(self, archive: EvolutionArchive, node_id: str,
+                 tag_lexicon=None) -> None:
+        super().__init__(archive, tag_lexicon=tag_lexicon)
+        self.node_id = node_id
+
+    def route(self, task: str) -> RouteDecision:
+        node = self.archive.get(self.node_id)
+        fp = fingerprint(task, tag_lexicon=self.tag_lexicon)
+        d = RouteDecision(
+            task=task, fingerprint=fp,
+            selected_id=node.id if node else None,
+            selected_name=node.name if node else "",
+            scores={}, reason="父子成对验证：强制指定节点", fallback=False,
+        )
+        self._last_decision = d
+        return d
+
+
 def _sample(cases: list[dict], limit: int, seed: int) -> list[dict]:
     out = list(cases)
     random.Random(seed).shuffle(out)
@@ -221,6 +242,7 @@ def _write_memory(case: dict, tmem: TemporalMemory) -> int:
 async def _answer_one(
     case: dict, group: str, out_dir: Path, shared_dir: Path,
     memory_mode: str = "script", memory_temperature: float = 0.1,
+    forced_expert_id: str = "",
 ) -> tuple[str, dict]:
     """单题：写记忆 → 按组工具白名单 retrieval 答题 → 证据落 validation。
 
@@ -232,6 +254,8 @@ async def _answer_one(
     ar, router = build_archive(group, shared_dir / "archive.json")
 
     base = GatewayModelProvider(SuanliAdapter())   # 工具模式（答题阶段）
+    if forced_expert_id:
+        router = ForcedExpertRouter(ar, forced_expert_id, tag_lexicon=_TAG_LEXICON)
     model = ExpertModelProvider(base, router, ar) if router else base
 
     # 记忆阶段：确定性 或 低温模型自记（四组一致）
@@ -246,7 +270,9 @@ async def _answer_one(
         mem_source = "script"
 
     # 工具过滤：D 组按专家白名单，其它组不过滤（全部工具）
-    tool_filter = model.tools_for if (group == "D" and router is not None) else None
+    tool_filter = (model.tools_for
+                   if router is not None and (group == "D" or forced_expert_id)
+                   else None)
     agent = YoAiAgent(
         model=model, data_dir=out_dir / "ctx", temporal_memory=tmem,
         tool_filter=tool_filter,
@@ -269,7 +295,7 @@ async def _answer_one(
             final = str(event.data.get("final_text") or "")
 
     evidence = collector.finish(
-        session_id=f"evo2-{group}", task=question,
+        session_id=f"evo2-{group}-{'parent' if forced_expert_id else 'child'}", task=question,
         task_fingerprint=fp.key, fingerprint_tags=fp.tags,
         sample_class=SAMPLE_VALIDATION,
         expert_id=getattr(model, "last_expert_id", None) or "root",
@@ -279,7 +305,8 @@ async def _answer_one(
     )
     ev_store.add(evidence)
     return final.strip(), {
-        "group": group, "expert_id": evidence.expert_id, "parent_id": evidence.parent_id,
+        "group": group, "variant": "parent" if forced_expert_id else "child",
+        "expert_id": evidence.expert_id, "parent_id": evidence.parent_id,
         "mem_events": n_mem, "mem_source": mem_source,
         "tool_calls": tool_calls, "status": evidence.status,
     }
@@ -290,6 +317,8 @@ def main() -> int:
     ap.add_argument("--data", default=str(ROOT / "bench_data" / "longmemeval_oracle.json"))
     ap.add_argument("--group", choices=[*GROUPS, "all"], default="all")
     ap.add_argument("--limit", type=int, default=30)
+    ap.add_argument("--offset", type=int, default=0,
+                    help="从打乱后的样本中跳过前 N 题（分片并行用，seed 与 limit 需一致）")
     ap.add_argument("--seed", type=int, default=20261121)
     ap.add_argument("--out", required=True)
     ap.add_argument("--memory-mode", choices=["script", "model"], default="script",
@@ -299,7 +328,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cases = json.load(open(args.data, encoding="utf-8"))
-    sample = _sample(cases, args.limit, args.seed)
+    sample = _sample(cases, args.offset + args.limit, args.seed)[args.offset:]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     groups = GROUPS if args.group == "all" else (args.group,)
@@ -312,9 +341,10 @@ def main() -> int:
         "memory_mode": args.memory_mode,
         "memory_temperature": args.memory_temperature if args.memory_mode == "model" else None,
         "tool_whitelists": {
-            "root": "all", "memory_expert": sorted(TIME_TOOLS),
-            "research_expert": sorted(AGGREGATE_TOOLS), "parent_*": sorted(BASIC_TOOLS),
+            "root": sorted(ALL_MEMORY_TOOLS), "memory_expert": sorted(ALL_MEMORY_TOOLS),
+            "research_expert": sorted(ALL_MEMORY_TOOLS), "parent_*": sorted(BASIC_TOOLS),
         },
+        "offset": args.offset,
         "note": "接线版：白名单生效+retrieval+父子成对；D组专家工具不同，A/B/C全工具",
     }
     (out / "config.json").write_text(
@@ -333,7 +363,7 @@ def main() -> int:
                 if line.strip():
                     try:
                         rec = json.loads(line)
-                        done[rec["question_id"]] = rec
+                        done[f"{rec['question_id']}:{rec.get('variant', 'child')}"] = rec
                     except (json.JSONDecodeError, KeyError):
                         pass
         print(f"[{group}] RESUME {len(done)}/{len(sample)}", flush=True)
@@ -342,32 +372,46 @@ def main() -> int:
         traces: list[dict] = []
         for i, case in enumerate(sample, 1):
             qid = case["question_id"]
-            if qid in done:
-                rec = done[qid]
-                hyps.append({"question_id": qid, "hypothesis": rec.get("hypothesis", "")})
-                traces.append(rec.get("trace", {}))
-                continue
-            try:
-                answer, meta = asyncio.run(_answer_one(
-                    case, group, gdir / f"case_{i}", shared,
-                    memory_mode=args.memory_mode,
-                    memory_temperature=args.memory_temperature,
-                ))
-            except Exception as exc:
-                answer, meta = "", {"error": f"{type(exc).__name__}: {exc}"}
-            trace = {
-                "question_id": qid, "question_type": case["question_type"],
-                "question": case["question"], "answer": str(case["answer"]),
-                "hypothesis": answer, **meta,
-            }
-            hyps.append({"question_id": qid, "hypothesis": answer})
-            traces.append(trace)
-            with progress.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps({"question_id": qid, "hypothesis": answer,
-                                     "trace": trace}, ensure_ascii=False) + "\n")
-                fh.flush()
-            print(f"[{group} {i}/{len(sample)}] {qid} expert={meta.get('expert_id')} tools={len(meta.get('tool_calls',[]))} -> {answer[:35]!r}",
-                  flush=True)
+            ar_pair, _ = (build_archive(group, shared / "archive.json")
+                          if group in ("C", "D") else (None, None))
+            variants: list[tuple[str, str]] = [("child", "")]
+            for variant, forced in variants:
+                key = f"{qid}:{variant}"
+                if key in done:
+                    rec = done[key]
+                    hyps.append({"question_id": qid, "hypothesis": rec.get("hypothesis", "")})
+                    traces.append(rec.get("trace", {}))
+                    continue
+                try:
+                    answer, meta = asyncio.run(_answer_one(
+                        case, group, gdir / f"case_{i}_{variant}", shared,
+                        memory_mode=args.memory_mode,
+                        memory_temperature=args.memory_temperature,
+                        forced_expert_id=forced,
+                    ))
+                except Exception as exc:
+                    answer, meta = "", {"error": f"{type(exc).__name__}: {exc}"}
+                trace = {
+                    "question_id": qid, "variant": variant,
+                    "question_type": case["question_type"],
+                    "question": case["question"], "answer": str(case["answer"]),
+                    "hypothesis": answer, **meta,
+                }
+                hyps.append({"question_id": qid, "hypothesis": answer})
+                traces.append(trace)
+                with progress.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"question_id": qid, "variant": variant,
+                                         "hypothesis": answer, "trace": trace},
+                                        ensure_ascii=False) + "\n")
+                    fh.flush()
+                print(f"[{group} {i}/{len(sample)}] {qid} {variant} "
+                      f"expert={meta.get('expert_id')} tools={len(meta.get('tool_calls', []))} "
+                      f"-> {answer[:35]!r}", flush=True)
+                # 子跑完后才知道父节点 id，追加强制父版本形成成对验证样本
+                if variant == "child" and ar_pair is not None:
+                    node = ar_pair.get(str(meta.get("expert_id", "")))
+                    if node and node.parent_id:
+                        variants.append(("parent", node.parent_id))
 
         (gdir / "hypotheses.jsonl").write_text(
             "\n".join(json.dumps(h, ensure_ascii=False) for h in hyps), encoding="utf-8"

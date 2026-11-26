@@ -54,9 +54,20 @@ export interface FileChangedMsg extends BaseMsg {
   change: FileChangeRecord;
 }
 
+export interface AttachmentInfo {
+  id: string;
+  name: string;
+  size: number;
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
 export interface HistoryEntry {
   role: string;
   text: string;
+  at?: string;
+  idx?: number;                 // 原始 Core 历史序号（撤回/编辑定位用）
 }
 
 export interface GoalInfo {
@@ -131,6 +142,30 @@ export interface ChatMsgMsg extends BaseMsg {
   at?: string;
 }
 
+export interface ArchiveEvidence {
+  id: string;
+  kind: string;
+  task_fingerprint: string;
+  outcome: string;
+  detail: string;
+  created_at: string;
+}
+
+export interface EvolutionReportSummary {
+  id: string;
+  evidence_id: string;
+  triggered: boolean;
+  cause: string;
+  new_node_id: string | null;
+  reason: string;
+  created_at: string;
+  promotion?: { promoted: boolean; reason: string; report?: {
+    verdict: string; note: string; total_samples: number;
+    boundaries: Array<{ capability_tag: string; node_rate: number; parent_rate: number;
+      node_ci: number[]; parent_ci: number[]; sample_enough: boolean }>;
+  } | null } | null;
+}
+
 export interface ArchiveNode {
   id: string;
   name: string;
@@ -144,6 +179,8 @@ export interface ArchiveNode {
   model_tier: string;
   diff: string;
   evidence_count: number;
+  evidence?: ArchiveEvidence[];
+  reports?: EvolutionReportSummary[];
   created_at: string;
   prompt_suffix: string;
 }
@@ -209,8 +246,26 @@ export interface ApprovalRequestMsg extends BaseMsg {
 
 export interface ErrorMsg extends BaseMsg {
   type: "error";
-  stage: "startup" | "runtime" | "protocol" | "file" | "browser";
+  stage: "startup" | "runtime" | "protocol" | "file" | "browser" | "message" | "share";
   message: string;
+}
+
+export interface AttachmentReadyMsg extends BaseMsg {
+  type: "attachment.ready";
+  attachment: AttachmentInfo;
+}
+
+export interface MessageUpdatedMsg extends BaseMsg {
+  type: "message.updated";
+  kind: "retract" | "edit" | "regenerate";
+  index: number;
+  detail: string;
+}
+
+export interface ShareExportedMsg extends BaseMsg {
+  type: "share.exported";
+  path: string;
+  count: number;
 }
 
 /** 右侧工具面板：系统浏览器兜底已触发。 */
@@ -245,7 +300,8 @@ export interface FileContentMsg extends BaseMsg {
 export type RuntimeMsg =
   | ReadyMsg | StatusMsg | EventMsg | FinalMsg | ApprovalRequestMsg | ErrorMsg
   | SnapshotMsg | ChatStateMsg | ChatMsgMsg | ArchiveStateMsg | PermissionStateMsg
-  | FileChangedMsg | BrowserOpenedMsg | FileTreeMsg | FileContentMsg;
+  | FileChangedMsg | BrowserOpenedMsg | FileTreeMsg | FileContentMsg
+  | AttachmentReadyMsg | MessageUpdatedMsg | ShareExportedMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -274,6 +330,12 @@ export type Command =
   | { v: 1; type: "browser.open"; url: string }
   | { v: 1; type: "fs.list"; path: string }
   | { v: 1; type: "fs.read"; path: string }
+  | { v: 1; type: "attachment.prepare"; path: string }
+  | { v: 1; type: "attachment.remove"; id: string }
+  | { v: 1; type: "message.retract"; index: number }
+  | { v: 1; type: "message.edit"; index: number; input: string; task_id: string; run_id: string }
+  | { v: 1; type: "task.regenerate"; index: number; input: string; task_id: string; run_id: string }
+  | { v: 1; type: "share.export"; path: string; content: string; count: number }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

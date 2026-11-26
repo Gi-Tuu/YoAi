@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+from contextlib import closing
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -22,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from yai_core.memory import SqliteStore
+from yai_core.types import ChatMessage
 
 from yoai.agent import YoAiAgent
 
@@ -73,6 +76,7 @@ class SessionManager:
         agent_kwargs: dict[str, Any] | None = None,
         agent_kwargs_for_session: Callable[[Any], dict[str, Any] | None] | None = None,
         memory_dir_for_session: Callable[[Any], Path | None] | None = None,
+        memory_for_session: Callable[[str, Any], Any] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -86,6 +90,7 @@ class SessionManager:
         # 项目模式按会话注入：返回 None 表示该会话用默认 _agent_kwargs（聊天模式）
         self._agent_kwargs_for_session = agent_kwargs_for_session
         self._memory_dir_for_session = memory_dir_for_session
+        self._memory_for_session = memory_for_session
         self.shared_context_dir = Path(shared_context_dir) if shared_context_dir else self.data_dir / "shared"
         self._sessions: dict[str, Session] = {}
         self._agents: dict[str, YoAiAgent] = {}   # session_id -> 实例缓存
@@ -207,7 +212,8 @@ class SessionManager:
             agent = YoAiAgent(
                 model=self._model_factory(),
                 data_dir=memory_dir,                 # 项目模式按项目隔离，聊天模式全局共享
-                memory=store,                        # 构造时传入，Core loop 才会绑定
+                memory=(self._memory_for_session(sid, store)
+                        if self._memory_for_session is not None else store),  # 构造时绑定，Core loop 才生效
                 **kwargs,                            # 桌面端在此注入 builtin_tools / 项目工具等
             )
             self._agents[sid] = agent
@@ -230,6 +236,24 @@ class SessionManager:
             self._sessions[sid].message_count += delta
             self._sessions[sid].last_active = _now()
             self._save_index()
+
+    def history_timestamps(self, session_id: str, messages: list[ChatMessage]) -> list[str]:
+        """Read UTC timestamps for the exact history snapshot returned by Core."""
+        if not messages or session_id not in self._sessions:
+            return []
+        db = (self._history_dir / f"{session_id}.db").resolve()
+        try:
+            with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
+                rows = conn.execute(
+                    "SELECT role, content, created_at FROM history WHERE scope = ? ORDER BY id",
+                    (session_id,),
+                ).fetchall()
+        except sqlite3.Error:
+            return []
+        # If the store changed between reads, showing no time is safer than mismatching rows.
+        if [(role, content) for role, content, _ in rows] != [(m.role, m.content) for m in messages]:
+            return []
+        return [created.replace(" ", "T") + "Z" for _, _, created in rows]
 
     def history_len(self, session_id: str | None = None) -> int:
         """从持久化记忆读该会话历史条数（跨会话恢复验证用）。"""

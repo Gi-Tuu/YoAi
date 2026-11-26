@@ -34,10 +34,12 @@ code, pre { font-family: var(--mono); }
 .chat-scroll { flex: 1; overflow-y: auto; padding: var(--sp-5); min-height: 0; }
 .empty { color: var(--weak); text-align: center; margin-top: 30vh; }
 
+.user-turn { display: flex; flex-direction: column; align-items: flex-end;
+  gap: 4px; margin: var(--sp-3) 0 var(--sp-2); }
 .user-msg {
   background: var(--surface); border: 1px solid var(--rule);
   border-radius: var(--radius); padding: var(--sp-3) var(--sp-4);
-  margin: var(--sp-3) 0 var(--sp-2) auto; max-width: 82%; white-space: pre-wrap;
+  max-width: 82%; text-align: right; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .chat-run { margin: 0 0 var(--sp-5) 0; }
 .run-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
@@ -213,30 +215,14 @@ button.ghost:hover { color: var(--accent); background: var(--accent-soft); }
 
 .right-rail {
   position: relative; flex: 1 0 0; min-width: var(--window-control-width);
-  display: flex; flex-direction: column;
+  display: flex;
 }
 .side-cards {
   --tile-size: 58px;
-  position: relative; z-index: 1; flex: 1 1 auto; min-height: 220px;
+  position: relative; z-index: 1; flex: 1 0 68px; min-height: 220px;
 }
 
-/* 右侧下方三个工具方格：浏览器 / 终端 / 查看文件 */
-.tool-dock { position: relative; z-index: 12; flex: none; padding: 0 10px 14px; }
-.tool-dock-grid { display: grid; grid-template-columns: repeat(3, 58px);
-  gap: 8px; justify-content: center; }
-.dock-tile { width: 58px; aspect-ratio: 1; padding: 0; display: grid; place-content: center;
-  gap: 2px; font-size: 11px; background: var(--surface-2); }
-.dock-tile.active { border-color: var(--accent); background: var(--accent-soft); }
-.dock-icon { font-size: 18px; line-height: 1; color: var(--accent); font-family: var(--mono); }
-.tool-panel { position: absolute; right: 10px; bottom: 74px; z-index: 20;
-  width: min(380px, calc(100vw - 40px)); height: min(460px, 68vh);
-  display: flex; flex-direction: column; overflow: hidden;
-  background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius);
-  box-shadow: 0 8px 28px #0003; }
-.tool-panel > header { display: flex; justify-content: space-between; align-items: center;
-  padding: var(--sp-2) var(--sp-3); font-size: 12px; color: var(--accent);
-  border-bottom: 1px solid var(--rule); }
-.tool-panel-close { padding: 0; width: 24px; height: 24px; line-height: 1; font-size: 16px; }
+.dock-icon { font-size: 16px; line-height: 1; color: var(--accent); font-family: var(--mono); }
 .tool-notice { padding: 4px var(--sp-3); font-size: 11px; color: var(--dim);
   border-bottom: 1px solid var(--rule); }
 .tool-browser, .tool-terminal, .tool-files { flex: 1; min-height: 0;
@@ -268,8 +254,8 @@ button.ghost:hover { color: var(--accent); background: var(--accent-soft); }
 .tool-file-content pre { flex: 1; background: var(--surface); }
 .side-tile {
   position: absolute; translate: -50% -50%; z-index: 4;
-  width: var(--tile-size); aspect-ratio: 1; padding: 0; display: grid;
-  place-content: center; gap: 2px; color: var(--ink); font-size: 11px;
+  width: var(--tile-size); aspect-ratio: 1; padding: 0 2px; display: grid;
+  place-content: center; gap: 2px; color: var(--ink); font-size: 11px; line-height: 1.15;
   background: var(--surface-2); animation: side-tile-drift 5.8s ease-in-out infinite;
 }
 .side-tile:nth-child(2) { animation-delay: -1.7s; animation-duration: 6.4s; }
@@ -538,3 +524,24 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 .diff-sign { width: 10px; flex-shrink: 0; font-family: var(--font-mono); }
 .diff-num { width: 28px; flex-shrink: 0; text-align: right; color: var(--weak); font-family: var(--font-num); font-size: 11px; }
 .diff-text { flex: 1; white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); }
+
+/* 消息动作条：hover 时可见，归属区分用户/智能体 */
+.message-actions { display: flex; gap: 4px; justify-content: flex-end; margin-top: 4px; opacity: 0.35; }
+.chat-run:hover .message-actions, .user-turn:hover .message-actions,
+.message-actions:focus-within { opacity: 1; }
+.message-actions button { padding: 2px 7px; font-size: var(--fs-cap); color: var(--dim); }
+.attach-btn { padding: 3px 9px; font-size: var(--fs-note); }
+.attachment-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--sp-2); }
+.attachment-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 220px;
+  padding: 2px 6px; border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  background: var(--surface-2); font-size: var(--fs-cap); color: var(--ink); }
+.attachment-chip button { border: none; background: transparent; padding: 0 2px; line-height: 1; }
+.user-turn { display: flex; flex-direction: column; align-items: flex-end; }
+
+/* 星图节点的进化审计与证据链 */
+.evo-reports, .evo-evidence { margin-top: var(--sp-2); border-top: 1px solid var(--rule); padding-top: var(--sp-1); }
+.evo-report { padding: var(--sp-1) 0; font-size: var(--fs-cap); color: var(--dim);
+  border-bottom: 1px solid var(--rule); line-height: 1.5; }
+.evo-boundaries { font-family: var(--mono); color: var(--ink); }
+.evo-evidence-row { font-size: var(--fs-cap); color: var(--dim); padding: 2px 0;
+  font-family: var(--mono); word-break: break-all; }
