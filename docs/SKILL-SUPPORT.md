@@ -80,8 +80,30 @@
 
 协议：`skill.status` / `skill.config_get` / `skill.config_set` / `skill.reload`。
 
+## 依赖版本管理
+
+manifest 可声明：
+
+```json
+{
+  "skills": [{
+    "name": "demo",
+    "requirements": ["requests>=2.31,<3"],
+    "requirements_file": ""
+  }]
+}
+```
+
+- `requirements`：内联依赖列表；留空时读取 bundle 内 `requirements.txt`。
+- `generate requirements`：把内联依赖写入 `<data_dir>/skills/<name>/requirements.txt`。
+- `generate lockfile`：调用 `uv pip compile --python <当前 Python> requirements.txt -o requirements.lock.txt`，
+  解析传递依赖并锁定版本；不会自动安装包。
+- 需要本机已安装 `uv` 并在 PATH 中；找不到时明确报错，不自动下载。
+- 技能页显示 requirements/lock 是否已生成，并提供两个生成按钮。
+
+协议：`skill.requirements_generate` / `skill.lock_generate`。
+
 ## 明确未做
 
-- Skill 依赖版本管理（requirements / lockfile）；
 - Skill 市场或远程安装；
 - Skill 自动纳入 RSI 候选（后续可做）。

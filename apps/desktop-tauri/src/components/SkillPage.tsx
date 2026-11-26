@@ -49,6 +49,14 @@ export function SkillPage() {
               <div className="mcp-meta">建议工具：{skill.tools.join(", ") || "无"}</div>
               <div className="mcp-meta">脚本：{status?.skills.find((s) => s.name === skill.name)?.scripts?.join(", ") || "无"}</div>
               <div className="mcp-meta">资源：{status?.skills.find((s) => s.name === skill.name)?.resources?.join(", ") || "无"}</div>
+              <div className="mcp-meta">
+                requirements：{status?.dependencies?.[skill.name]?.requirements_exists ? "已生成" : "未生成"}
+                · lock：{status?.dependencies?.[skill.name]?.lock_exists ? "已生成" : "未生成"}
+              </div>
+              <div className="mcp-actions">
+                <button type="button" onClick={() => void ipc.generateSkillRequirements(skill.name)}>生成 requirements</button>
+                <button type="button" onClick={() => void ipc.generateSkillLock(skill.name)}>生成 lockfile</button>
+              </div>
               <pre className="mcp-stderr">{skill.prompt}</pre>
             </div>
           ))}

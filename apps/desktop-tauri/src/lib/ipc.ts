@@ -246,6 +246,12 @@ export class IpcClient {
   async reloadSkills(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "skill.reload" });
   }
+  async generateSkillRequirements(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.requirements_generate", name });
+  }
+  async generateSkillLock(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.lock_generate", name });
+  }
 
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });

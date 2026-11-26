@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,3 +91,27 @@ def test_skill_store_hot_reload_and_validation(tmp_path):
 
     with pytest.raises(ValueError):
         store.set_config('{"skills": [{}]}')
+
+
+def test_skill_requirements_and_lockfile(tmp_path, monkeypatch):
+    _config(tmp_path, [{
+        "name": "demo", "prompt": "演示", "requirements": ["requests==2.31.0"],
+    }])
+    store = SkillStore(tmp_path)
+    req = Path(store.generate_requirements("demo"))
+    assert req.name == "requirements.txt"
+    assert "requests==2.31.0" in req.read_text(encoding="utf-8")
+
+    monkeypatch.setattr(shutil, "which", lambda name: "uv")
+
+    def fake_run(args, **kwargs):
+        assert args[0:3] == ["uv", "pip", "compile"]
+        assert "--python" in args
+        out = args[-1]
+        Path(out).write_text("requests==2.31.0\n", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="Resolved", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    lock = store.generate_lock("demo")
+    assert lock.endswith("requirements.lock.txt")
+    assert store.dependency_status("demo")["lock_exists"] is True

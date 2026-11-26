@@ -322,6 +322,8 @@ export interface SkillStateMsg extends BaseMsg {
     skills: Array<{ name: string; description: string; prompt: string; tools: string[];
       enforce_tools: boolean; scripts: Array<{ name: string; path: string; description: string; timeout: number }>;
       resources: string[] }>;
+    dependencies: Record<string, { requirements: string; requirements_exists: boolean;
+      lock: string; lock_exists: boolean; inline: string[] }>;
     tools: string[];
   };
 }
@@ -496,6 +498,8 @@ export type Command =
   | { v: 1; type: "skill.config_get" }
   | { v: 1; type: "skill.config_set"; text: string }
   | { v: 1; type: "skill.reload" }
+  | { v: 1; type: "skill.requirements_generate"; name: string }
+  | { v: 1; type: "skill.lock_generate"; name: string }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

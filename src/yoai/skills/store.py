@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -107,6 +108,8 @@ class SkillStore:
                         "enforce_tools": bool(item.get("enforce_tools", False)),
                         "scripts": scripts,
                         "resources": [str(r) for r in (item.get("resources") or [])],
+                        "requirements": [str(r) for r in (item.get("requirements") or [])],
+                        "requirements_file": str(item.get("requirements_file", "")).strip(),
                     })
             except (OSError, ValueError):
                 skills = []
@@ -127,6 +130,77 @@ class SkillStore:
         self._ensure_fresh()
         with self._lock:
             return next((dict(s) for s in self._skills if s["name"] == name), None)
+
+    # --- 依赖版本管理 ---
+    def _requirements_source(self, skill: dict[str, Any]) -> Path:
+        bundle = self._bundle_dir(skill["name"])
+        if skill["requirements_file"]:
+            return (bundle / skill["requirements_file"]).resolve()
+        return bundle / "requirements.txt"
+
+    def requirements_text(self, name: str) -> str:
+        skill = self._skill(name)
+        if skill is None:
+            raise ValueError(f"技能不存在：{name}")
+        source = self._requirements_source(skill)
+        if source.exists():
+            try:
+                return source.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ValueError(f"读取 requirements 失败：{exc}") from exc
+        return "\n".join(skill["requirements"])
+
+    def generate_requirements(self, name: str) -> str:
+        skill = self._skill(name)
+        if skill is None:
+            raise ValueError(f"技能不存在：{name}")
+        if skill["requirements_file"]:
+            return f"使用声明的 requirements 文件：{skill['requirements_file']}"
+        bundle = self._bundle_dir(name)
+        bundle.mkdir(parents=True, exist_ok=True)
+        target = bundle / "requirements.txt"
+        content = "\n".join(skill["requirements"])
+        if not content.endswith("\n"):
+            content += "\n"
+        target.write_text(content, encoding="utf-8")
+        return str(target)
+
+    def generate_lock(self, name: str, *, timeout: float = 180.0) -> str:
+        skill = self._skill(name)
+        if skill is None:
+            raise ValueError(f"技能不存在：{name}")
+        requirements = self._requirements_source(skill)
+        if not requirements.exists():
+            self.generate_requirements(name)
+        bundle = self._bundle_dir(name)
+        lock = bundle / "requirements.lock.txt"
+        uv = shutil.which("uv")
+        if not uv:
+            raise RuntimeError("未找到 uv；请先安装 uv 并加入 PATH（不会自动下载）")
+        try:
+            completed = subprocess.run(
+                [uv, "pip", "compile", "--python", sys.executable,
+                 str(requirements), "-o", str(lock)],
+                cwd=str(bundle), capture_output=True, text=True,
+                timeout=timeout, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"生成 lockfile 失败：{exc}") from exc
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()[:800]
+            raise RuntimeError(f"uv pip compile 失败：{detail}")
+        return str(lock)
+
+    def dependency_status(self, name: str) -> dict[str, Any]:
+        skill = self._skill(name)
+        if skill is None:
+            return {}
+        bundle = self._bundle_dir(name)
+        req = self._requirements_source(skill)
+        lock = bundle / "requirements.lock.txt"
+        return {"requirements": str(req), "requirements_exists": req.exists(),
+                "lock": str(lock), "lock_exists": lock.exists(),
+                "inline": skill["requirements"]}
 
     def _build_specs(self, agent: Any = None) -> list[ToolSpec]:
         def skill_list() -> str:
@@ -229,4 +303,6 @@ class SkillStore:
         with self._lock:
             return {"config": str(self.path),
                     "skills": [dict(s) for s in self._skills],
+                    "dependencies": {s["name"]: self.dependency_status(s["name"])
+                                     for s in self._skills},
                     "tools": [spec.name for spec in self._specs]}

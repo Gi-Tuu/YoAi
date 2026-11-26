@@ -1213,6 +1213,22 @@ class Runtime:
                 await self.send(self._archive_state())
             except (ValueError, RuntimeError) as exc:
                 await self.send(error("message", str(exc)))
+        elif typ in ("skill.requirements_generate", "skill.lock_generate"):
+            if self.skill_store is None:
+                await self.send(error("skill", "技能库尚未初始化"))
+                return True
+            name = str(cmd.get("name", ""))
+            try:
+                if typ == "skill.requirements_generate":
+                    path = self.skill_store.generate_requirements(name)
+                    message = f"requirements 已生成：{path}"
+                else:
+                    path = self.skill_store.generate_lock(name)
+                    message = f"lockfile 已生成：{path}"
+                await self.send(skill_ack(message=message))
+                await self.send(skill_state(status=self.skill_store.status()))
+            except (ValueError, RuntimeError, OSError) as exc:
+                await self.send(error("skill", str(exc)))
         elif typ == "skill.status":
             if self.skill_store is None:
                 await self.send(error("skill", "技能库尚未初始化"))
