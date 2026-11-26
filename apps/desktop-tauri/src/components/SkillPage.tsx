@@ -10,6 +10,7 @@ export function SkillPage() {
   const [market, setMarket] = useState<SkillMarketStateMsg["status"] | null>(null);
   const [text, setText] = useState("{\n  \"skills\": []\n}");
   const [notice, setNotice] = useState("");
+  const [remoteUrl, setRemoteUrl] = useState("");
 
   const refresh = useCallback(() => {
     void ipc.getSkillStatus();
@@ -45,18 +46,25 @@ export function SkillPage() {
 
       <section className="mcp-card" style={{ marginBottom: "var(--sp-3)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3>本地技能市场（{market?.items.length ?? 0}）</h3>
-          <button type="button" onClick={() => void (async () => {
-            const picked = await openDir({ directory: true, multiple: false, title: "选择技能包目录" });
-            if (picked && typeof picked === "string") await ipc.addSkillMarket(picked);
-          })()}>登记本地包</button>
+          <h3>技能市场（{market?.items.length ?? 0}）</h3>
+          <div className="mcp-actions">
+            <input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)}
+                   placeholder="https://…/catalog.json" aria-label="远程市场地址" />
+            <button type="button" disabled={!remoteUrl.trim()}
+                    onClick={() => void ipc.addRemoteSkillMarket(remoteUrl.trim())}>添加远程源</button>
+            <button type="button" onClick={() => void ipc.refreshRemoteSkillMarket()}>刷新远程</button>
+            <button type="button" onClick={() => void (async () => {
+              const picked = await openDir({ directory: true, multiple: false, title: "选择技能包目录" });
+              if (picked && typeof picked === "string") await ipc.addSkillMarket(picked);
+            })()}>登记本地包</button>
+          </div>
         </div>
         {(market?.items.length ?? 0) === 0 && <div className="side-empty">市场为空。可发布当前技能或登记本地包。</div>}
         {market?.items.map((item) => (
           <div key={item.name} className="mcp-server">
             <div><b>{item.name}</b><span>v{item.version}</span></div>
             <div className="mcp-meta">{item.description}</div>
-            <div className="mcp-meta">lock：{item.lock_exists ? "已生成" : "未生成"} · {item.source}</div>
+            <div className="mcp-meta">来源：{item.source_type ?? "local"} · lock：{item.lock_exists ? "已生成" : "未生成"} · {item.source}</div>
             <div className="mcp-actions">
               <button type="button" onClick={() => void ipc.installMarketSkill(item.name)}>安装</button>
               <button type="button" onClick={() => void ipc.removeMarketSkill(item.name)}>移出市场</button>

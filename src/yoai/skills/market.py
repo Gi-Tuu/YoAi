@@ -1,14 +1,21 @@
-"""Skill 本地市场（YoAi 侧，内核零改动）。
+"""Skill 市场（YoAi 侧，内核零改动）。
 
-市场是本地目录式：登记本地技能包 → 安装到 skills 目录 → 发布已安装技能为包。
-不做远端下载、不自动 pip 安装；requirements/lockfile 随包复制与校验。
+本地目录式 + 远程 catalog 式：登记技能包 → 安装到 skills 目录 → 发布已安装技能为包。
+远程只支持 http(s) catalog 与 zip 包，带 sha256 校验与安全解压；不自动 pip 安装。
+requirements / lockfile 随 catalog 或包写入安装目录。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
+import tempfile
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,10 +27,13 @@ class SkillMarket:
     def __init__(self, data_dir: str | Path, store: SkillStore) -> None:
         self.root = Path(data_dir) / "skills"
         self.catalog_path = self.root / "market.json"
+        self.sources_path = self.root / "market_sources.json"
         self.packages_dir = self.root / "market"
         self.store = store
         self._lock = threading.RLock()
         self._items: list[dict[str, Any]] = []
+        self._sources: list[str] = []
+        self._load_sources()
         self._load()
 
     def _load(self) -> None:
@@ -33,7 +43,12 @@ class SkillMarket:
         try:
             raw = json.loads(self.catalog_path.read_text(encoding="utf-8"))
             items = raw.get("skills", []) if isinstance(raw, dict) else []
-            self._items = [i for i in items if isinstance(i, dict)]
+            self._items = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item.setdefault("source_type", "local")
+                self._items.append(item)
         except (OSError, ValueError):
             self._items = []
 
@@ -42,9 +57,100 @@ class SkillMarket:
         text = json.dumps({"skills": self._items}, ensure_ascii=False, indent=2)
         self.catalog_path.write_text(text, encoding="utf-8")
 
+    def _load_sources(self) -> None:
+        if not self.sources_path.exists():
+            return
+        try:
+            raw = json.loads(self.sources_path.read_text(encoding="utf-8"))
+            sources = raw.get("sources", []) if isinstance(raw, dict) else []
+            self._sources = [str(s) for s in sources
+                             if str(s).startswith(("http://", "https://"))]
+        except (OSError, ValueError):
+            self._sources = []
+
+    def _save_sources(self) -> None:
+        self.sources_path.parent.mkdir(parents=True, exist_ok=True)
+        self.sources_path.write_text(
+            json.dumps({"sources": self._sources}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(i) for i in self._items]
+
+    def list_sources(self) -> list[str]:
+        with self._lock:
+            return list(self._sources)
+
+    def add_remote(self, url: str, *, auto_refresh: bool = True) -> list[str]:
+        clean = str(url).strip()
+        if not clean.startswith(("http://", "https://")):
+            raise ValueError("远程市场仅支持 http/https catalog")
+        with self._lock:
+            if clean not in self._sources:
+                self._sources.append(clean)
+                self._save_sources()
+        if auto_refresh:
+            self.refresh_remote()
+        return self.list_sources()
+
+    def remove_remote(self, url: str) -> bool:
+        with self._lock:
+            before = len(self._sources)
+            self._sources = [s for s in self._sources if s != str(url).strip()]
+            self._save_sources()
+            return len(self._sources) < before
+
+    @staticmethod
+    def _abs_url(value: str, base: str) -> str:
+        value = str(value).strip()
+        if not value:
+            return ""
+        if value.startswith(("http://", "https://")):
+            return value
+        return urllib.parse.urljoin(base, value)
+
+    @staticmethod
+    def _fetch_bytes(url: str, *, timeout: float = 20.0) -> bytes:
+        request = urllib.request.Request(url, headers={"Accept": "application/json, application/zip"})
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise RuntimeError(f"下载失败：{url}（{exc}）") from exc
+
+    def refresh_remote(self) -> list[dict[str, Any]]:
+        merged = [i for i in self._items if i.get("source_type") != "remote"]
+        for source in self.list_sources():
+            try:
+                data = json.loads(self._fetch_bytes(source).decode("utf-8"))
+            except (ValueError, RuntimeError) as exc:
+                print(f"[skill-market] catalog 读取失败 {source}: {exc}",
+                      file=__import__("sys").stderr, flush=True)
+                continue
+            items = data.get("skills", []) if isinstance(data, dict) else []
+            for item in items:
+                if not isinstance(item, dict) or not str(item.get("name", "")).strip():
+                    continue
+                name = str(item["name"]).strip()
+                merged.append({
+                    "name": name,
+                    "version": str(item.get("version", "0.1.0")),
+                    "description": str(item.get("description", "")),
+                    "source": self._abs_url(str(item.get("url", "")), source),
+                    "source_type": "remote",
+                    "catalog_url": source,
+                    "sha256": str(item.get("sha256", "")),
+                    "requirements": [str(r) for r in (item.get("requirements") or [])],
+                    "lockfile_url": self._abs_url(str(item.get("lockfile_url", "")), source),
+                    "lockfile": str(item.get("lockfile", "")),
+                    "requirements_exists": bool(item.get("requirements") or item.get("requirements_url")),
+                    "lock_exists": bool(item.get("lockfile_url") or item.get("lockfile")),
+                })
+        with self._lock:
+            self._items = merged
+            self._save()
+        return self.list()
 
     @staticmethod
     def _read_manifest(package: Path) -> dict[str, Any]:
@@ -59,6 +165,49 @@ class SkillMarket:
             raise ValueError("skill.json 必须包含 name")
         return data
 
+    @staticmethod
+    def _extract_zip(data: bytes, dest: Path) -> None:
+        with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
+            root = dest.resolve()
+            for info in archive.infolist():
+                if info.is_dir():
+                    continue
+                target = (root / info.filename).resolve()
+                if target != root and root not in target.parents:
+                    raise ValueError(f"压缩包路径越界：{info.filename}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(archive.read(info))
+
+    def _prepare_remote_package(
+        self, entry: dict[str, Any], tmp: tempfile.TemporaryDirectory,
+    ) -> Path:
+        url = str(entry.get("source", ""))
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("远程技能包 URL 非法")
+        data = self._fetch_bytes(url)
+        expected = str(entry.get("sha256", "")).strip().lower()
+        if expected and hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError("远程技能包 sha256 校验失败")
+        dest = Path(tmp.name) / "package"
+        dest.mkdir(parents=True, exist_ok=True)
+        self._extract_zip(data, dest)
+        manifest = dest / "skill.json"
+        if not manifest.exists():
+            raise ValueError("远程技能包缺少 skill.json")
+        requirements = dest / "requirements.txt"
+        inline = entry.get("requirements") or []
+        if inline and not requirements.exists():
+            requirements.write_text("\n".join(str(r) for r in inline) + "\n",
+                                    encoding="utf-8")
+        lockfile = dest / "requirements.lock.txt"
+        lock_text = str(entry.get("lockfile", ""))
+        if lock_text and not lockfile.exists():
+            lockfile.write_text(lock_text, encoding="utf-8")
+        lock_url = str(entry.get("lockfile_url", ""))
+        if lock_url and not lockfile.exists():
+            lockfile.write_bytes(self._fetch_bytes(lock_url))
+        return dest
+
     def add_local(self, source: str | Path) -> dict[str, Any]:
         package = Path(source).expanduser().resolve()
         if not package.is_dir():
@@ -70,6 +219,7 @@ class SkillMarket:
             "version": str(manifest.get("version", "0.1.0")),
             "description": str(manifest.get("description", "")),
             "source": str(package),
+            "source_type": "local",
             "added_at": datetime.now(timezone.utc).isoformat(),
         }
         with self._lock:
@@ -83,37 +233,49 @@ class SkillMarket:
             entry = next((dict(i) for i in self._items if i.get("name") == name), None)
         if entry is None:
             raise ValueError(f"市场中没有技能：{name}")
-        package = Path(str(entry.get("source", "")))
-        manifest = self._read_manifest(package)
-        pkg_name = str(manifest["name"]).strip()
-        if pkg_name != name:
-            raise ValueError(f"包名不一致：{name} != {pkg_name}")
+        tmp: tempfile.TemporaryDirectory | None = None
+        try:
+            if entry.get("source_type") == "remote":
+                tmp = tempfile.TemporaryDirectory(prefix="yoai-remote-skill-")
+                package = self._prepare_remote_package(entry, tmp)
+            else:
+                package = Path(str(entry.get("source", "")))
+            if not package.is_dir():
+                raise ValueError("技能包目录不存在")
+            manifest = self._read_manifest(package)
+            pkg_name = str(manifest["name"]).strip()
+            if pkg_name != name:
+                raise ValueError(f"包名不一致：{name} != {pkg_name}")
 
-        target = self.root / name
-        if target.exists():
-            backup = target.with_name(f"{name}.bak-{int(datetime.now(timezone.utc).timestamp())}")
-            target.rename(backup)
-        shutil.copytree(package, target)
+            target = self.root / name
+            if target.exists():
+                backup = target.with_name(
+                    f"{name}.bak-{int(datetime.now(timezone.utc).timestamp())}")
+                target.rename(backup)
+            shutil.copytree(package, target)
 
-        requirements = target / "requirements.txt"
-        if not requirements.exists():
-            inline = manifest.get("requirements") or []
-            requirements.write_text("\n".join(str(r) for r in inline) + "\n",
-                                    encoding="utf-8")
-        lockfile = target / "requirements.lock.txt"
+            requirements = target / "requirements.txt"
+            if not requirements.exists():
+                inline = manifest.get("requirements") or []
+                requirements.write_text("\n".join(str(r) for r in inline) + "\n",
+                                        encoding="utf-8")
+            lockfile = target / "requirements.lock.txt"
 
-        self._upsert_skill_manifest(manifest, requirements_exists=True,
-                                    lock_exists=lockfile.exists())
-        self.store.refresh()
-        with self._lock:
-            for item in self._items:
-                if item.get("name") == name:
-                    item["installed"] = True
-                    item["installed_at"] = datetime.now(timezone.utc).isoformat()
-                    break
-            self._save()
-        return {"name": name, "target": str(target),
-                "requirements_exists": True, "lock_exists": lockfile.exists()}
+            self._upsert_skill_manifest(manifest, requirements_exists=True,
+                                        lock_exists=lockfile.exists())
+            self.store.refresh()
+            with self._lock:
+                for item in self._items:
+                    if item.get("name") == name:
+                        item["installed"] = True
+                        item["installed_at"] = datetime.now(timezone.utc).isoformat()
+                        break
+                self._save()
+            return {"name": name, "target": str(target),
+                    "requirements_exists": True, "lock_exists": lockfile.exists()}
+        finally:
+            if tmp is not None:
+                tmp.cleanup()
 
     def publish(self, name: str) -> dict[str, Any]:
         installed = self.root / name
@@ -153,6 +315,7 @@ class SkillMarket:
         entry = {
             "name": name, "version": payload["version"],
             "description": payload["description"], "source": str(package),
+            "source_type": "local",
             "published_at": datetime.now(timezone.utc).isoformat(),
             "requirements_exists": requirements.exists(),
             "lock_exists": lockfile.exists(),
@@ -196,6 +359,10 @@ class SkillMarket:
                         encoding="utf-8")
 
     def status(self) -> dict[str, Any]:
+        items = self.list()
+        for item in items:
+            item.setdefault("source_type", "local")
         return {"catalog": str(self.catalog_path),
+                "sources": self.list_sources(),
                 "packages_dir": str(self.packages_dir),
-                "items": self.list()}
+                "items": items}

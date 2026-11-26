@@ -255,6 +255,12 @@ export class IpcClient {
   async getSkillMarket(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "skill.market_list" });
   }
+  async addRemoteSkillMarket(url: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.market_add_remote", url });
+  }
+  async refreshRemoteSkillMarket(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.market_refresh_remote" });
+  }
   async addSkillMarket(source: string): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "skill.market_add", source });
   }

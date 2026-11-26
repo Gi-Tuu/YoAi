@@ -24,9 +24,9 @@ describe("技能页", () => {
       } });
       ipc.inject({ v: 1, type: "skill.config", text: '{"skills": []}' });
       ipc.inject({ v: 1, type: "skill.market.state", status: {
-        catalog: "catalog", packages_dir: "pkgs",
+        catalog: "catalog", packages_dir: "pkgs", sources: [],
         items: [{ name: "market-demo", version: "1.0", description: "市场技能",
-          source: "source", lock_exists: true }],
+          source: "source", source_type: "local", lock_exists: true }],
       } });
       await new Promise((r) => setTimeout(r, 50));
     });

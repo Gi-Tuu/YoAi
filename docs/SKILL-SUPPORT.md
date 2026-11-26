@@ -103,9 +103,9 @@ manifest 可声明：
 
 协议：`skill.requirements_generate` / `skill.lock_generate`。
 
-## 本地技能市场
+## 技能市场（本地 + 远程 catalog）
 
-市场是本地目录式，不做远程下载：
+本地市场是目录式；远程市场只拉取 http(s) catalog 与 zip 包，不自动安装依赖：
 
 - `market.json`：登记的技能包目录；
 - `market/<name>/`：发布后的技能包；
@@ -116,10 +116,25 @@ manifest 可声明：
   复制到市场目录；
 - 移出市场：只删除市场登记，不动已安装技能文件。
 
-协议：`skill.market_list` / `market_add` / `market_install` / `market_publish` / `market_remove`。
-桌面「技能」页提供登记本地包、安装、发布到市场、移出市场按钮。
+远程源：`market_sources.json` 保存 catalog URL；catalog 条目格式：
+
+```json
+{"skills":[{"name":"demo","version":"1.0","description":"…",
+ "url":"/demo.zip","sha256":"<sha256>","requirements":["requests>=2.31"],
+ "lockfile_url":"/demo.lock.txt"}]}
+```
+
+- 相对 URL 按 catalog 地址解析；
+- zip 包安全解压：拒绝绝对路径与 `..`；
+- `sha256` 存在时强制校验，不匹配直接拒绝；
+- requirements/lockfile 可由 catalog 提供，随包写入安装目录；
+- 不执行 pip 安装，不下载未登记 URL。
+
+协议：`skill.market_list` / `market_add` / `market_add_remote` / `market_refresh_remote` /
+`market_install` / `market_publish` / `market_remove`。
+桌面「技能」页提供远程源地址、刷新远程、登记本地包、安装、发布、移出按钮。
 
 ## 明确未做
 
-- 远程市场与自动下载；
+- 自动 pip 安装与远端签名校验；
 - Skill 自动纳入 RSI 候选（后续可做）。

@@ -1220,7 +1220,8 @@ class Runtime:
                 await self.send(error("skill", "技能市场尚未初始化"))
             else:
                 await self.send(skill_market_state(status=self.skill_market.status()))
-        elif typ in ("skill.market_add", "skill.market_install",
+        elif typ in ("skill.market_add", "skill.market_add_remote",
+                     "skill.market_refresh_remote", "skill.market_install",
                      "skill.market_publish", "skill.market_remove"):
             if self.skill_market is None:
                 await self.send(error("skill", "技能市场尚未初始化"))
@@ -1230,8 +1231,15 @@ class Runtime:
                 if typ == "skill.market_add":
                     result = self.skill_market.add_local(str(cmd.get("source", "")))
                     message = f"已登记技能：{result['name']}"
+                elif typ == "skill.market_add_remote":
+                    sources = await asyncio.to_thread(
+                        self.skill_market.add_remote, str(cmd.get("url", "")))
+                    message = f"已登记远程源：{len(sources)} 个"
+                elif typ == "skill.market_refresh_remote":
+                    items = await asyncio.to_thread(self.skill_market.refresh_remote)
+                    message = f"远程市场已刷新：{len(items)} 条"
                 elif typ == "skill.market_install":
-                    result = self.skill_market.install(name)
+                    result = await asyncio.to_thread(self.skill_market.install, name)
                     message = f"已安装技能：{name}（lock={result['lock_exists']}）"
                 elif typ == "skill.market_publish":
                     result = self.skill_market.publish(name)

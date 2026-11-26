@@ -319,9 +319,11 @@ export interface SkillMarketStateMsg extends BaseMsg {
   type: "skill.market.state";
   status: {
     catalog: string;
+    sources: string[];
     packages_dir: string;
     items: Array<{ name: string; version: string; description: string; source: string;
-      installed?: boolean; lock_exists?: boolean; requirements_exists?: boolean }>;
+      source_type?: string; installed?: boolean; lock_exists?: boolean;
+      requirements_exists?: boolean }>;
   };
 }
 
@@ -512,6 +514,8 @@ export type Command =
   | { v: 1; type: "skill.requirements_generate"; name: string }
   | { v: 1; type: "skill.lock_generate"; name: string }
   | { v: 1; type: "skill.market_list" }
+  | { v: 1; type: "skill.market_add_remote"; url: string }
+  | { v: 1; type: "skill.market_refresh_remote" }
   | { v: 1; type: "skill.market_add"; source: string }
   | { v: 1; type: "skill.market_install"; name: string }
   | { v: 1; type: "skill.market_publish"; name: string }
