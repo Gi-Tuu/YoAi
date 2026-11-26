@@ -279,6 +279,11 @@ def skill_ack(*, message: str) -> dict[str, Any]:
     return {"v": PROTOCOL_VERSION, "type": "skill.ack", "message": message}
 
 
+def skill_ct_result(*, result: dict[str, Any]) -> dict[str, Any]:
+    """R5：远端 CT 校验/锚定结果（含 ok/reason/sha256/receipt_hash）。"""
+    return {"v": PROTOCOL_VERSION, "type": "skill.ct.result", "result": result}
+
+
 def mcp_state(*, status: dict[str, Any]) -> dict[str, Any]:
     """MCP server / tool 状态。"""
     return {"v": PROTOCOL_VERSION, "type": "mcp.state", "status": status}

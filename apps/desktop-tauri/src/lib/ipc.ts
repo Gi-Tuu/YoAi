@@ -283,6 +283,12 @@ export class IpcClient {
   async removeMarketSkill(name: string): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "skill.market_remove", name });
   }
+  async verifySkillCt(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.ct_verify", name });
+  }
+  async anchorSkillCt(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.ct_anchor", name });
+  }
 
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });

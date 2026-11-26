@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from yoai.skills.ct import RemoteCtClient, canonical, verify_ed25519
 from yoai.skills.store import SkillStore
 
 
@@ -164,6 +165,11 @@ class SkillMarket:
             return value
         return urllib.parse.urljoin(base, value)
 
+    @classmethod
+    def _http_url_or_empty(cls, value: str, base: str) -> str:
+        url = cls._abs_url(value, base)
+        return url if RemoteCtClient.http_url(url) else ""
+
     @staticmethod
     def _fetch_bytes(url: str, *, timeout: float = 20.0) -> bytes:
         request = urllib.request.Request(url, headers={"Accept": "application/json, application/zip"})
@@ -175,30 +181,7 @@ class SkillMarket:
 
     @staticmethod
     def _verify_ed25519(data: bytes, signature_b64: str, public_key_pem: str) -> None:
-        openssl = shutil.which("openssl")
-        if not openssl:
-            raise RuntimeError("catalog 要求签名校验，但本机未找到 openssl")
-        try:
-            signature = base64.b64decode(signature_b64, validate=True)
-        except (ValueError, TypeError) as exc:
-            raise ValueError("signature 不是合法 base64") from exc
-        with tempfile.TemporaryDirectory(prefix="yoai-skill-verify-") as tmp:
-            data_path = Path(tmp) / "package.bin"
-            sig_path = Path(tmp) / "package.sig"
-            key_path = Path(tmp) / "public.pem"
-            data_path.write_bytes(data)
-            sig_path.write_bytes(signature)
-            key_path.write_text(public_key_pem, encoding="utf-8")
-            try:
-                completed = subprocess.run(
-                    [openssl, "pkeyutl", "-verify", "-pubin", "-inkey", str(key_path),
-                     "-rawin", "-in", str(data_path), "-sigfile", str(sig_path)],
-                    capture_output=True, text=True, timeout=30, check=False,
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                raise RuntimeError(f"签名校验失败：{exc}") from exc
-        if completed.returncode != 0:
-            raise ValueError(f"签名校验失败：{(completed.stderr or '').strip()[:300]}")
+        verify_ed25519(data, signature_b64, public_key_pem)
 
     def refresh_remote(self) -> list[dict[str, Any]]:
         merged = [i for i in self._items if i.get("source_type") != "remote"]
@@ -230,6 +213,9 @@ class SkillMarket:
                     "signer_public_key": str(item.get("signer_public_key", "")),
                     "signer_cert_signature": str(item.get("signer_cert_signature", "")),
                     "signer_expires_at": str(item.get("signer_expires_at", "")),
+                    "ct_url": self._http_url_or_empty(
+                        str(item.get("ct_url", "")), source),
+                    "ct_public_key": str(item.get("ct_public_key", "")),
                     "requirements": [str(r) for r in (item.get("requirements") or [])],
                     "lockfile_url": self._abs_url(str(item.get("lockfile_url", "")), source),
                     "lockfile": str(item.get("lockfile", "")),
@@ -269,7 +255,7 @@ class SkillMarket:
 
     def _prepare_remote_package(
         self, entry: dict[str, Any], tmp: tempfile.TemporaryDirectory,
-    ) -> Path:
+    ) -> tuple[Path, str, str]:
         url = str(entry.get("source", ""))
         if not url.startswith(("http://", "https://")):
             raise ValueError("远程技能包 URL 非法")
@@ -302,12 +288,29 @@ class SkillMarket:
             self._verify_ed25519(data, signature, signer_pub)
         elif chained:
             raise ValueError("签名链完整但缺少包签名")
-        if signature or chained:
+        ct_receipt_hash = ""
+        ct_url = str(entry.get("ct_url", "")).strip()
+        ct_key = str(entry.get("ct_public_key", "")).strip()
+        if ct_url and not ct_key:
+            raise ValueError("catalog 提供 ct_url 但缺少 ct_public_key，拒绝安装")
+        if ct_url:
+            client = RemoteCtClient()
+            receipt = client.fetch(ct_url, digest)
+            if str(receipt.get("sha256", "")) != digest:
+                raise ValueError("CT 回执 sha256 与技能包不一致")
+            if not client.verify(receipt, ct_key):
+                raise ValueError("CT 回执签名或 Merkle 证明无效")
+            ct_receipt_hash = hashlib.sha256(
+                canonical(receipt).encode("utf-8")).hexdigest()
+        if signature or chained or ct_url:
             self._append_ct({
                 "name": str(entry.get("name", "")), "sha256": digest,
                 "catalog_url": str(entry.get("catalog_url", "")),
                 "signer_fp": hashlib.sha256(signer_pub.encode("utf-8")).hexdigest()[:16],
-                "chain": chained,
+                "chain": chained, "ct_url": ct_url,
+                "ct_key_fp": hashlib.sha256(ct_key.encode("utf-8")).hexdigest()[:16]
+                             if ct_key else "",
+                "ct_receipt_hash": ct_receipt_hash,
             })
         dest = Path(tmp.name) / "package"
         dest.mkdir(parents=True, exist_ok=True)
@@ -327,7 +330,7 @@ class SkillMarket:
         lock_url = str(entry.get("lockfile_url", ""))
         if lock_url and not lockfile.exists():
             lockfile.write_bytes(self._fetch_bytes(lock_url))
-        return dest
+        return dest, digest, ct_receipt_hash
 
     @staticmethod
     def _venv_python(venv: Path) -> Path:
@@ -433,9 +436,11 @@ class SkillMarket:
         try:
             if entry.get("source_type") == "remote":
                 tmp = tempfile.TemporaryDirectory(prefix="yoai-remote-skill-")
-                package = self._prepare_remote_package(entry, tmp)
+                package, package_sha256, ct_receipt_hash = self._prepare_remote_package(entry, tmp)
             else:
                 package = Path(str(entry.get("source", "")))
+                package_sha256 = ""
+                ct_receipt_hash = ""
             if not package.is_dir():
                 raise ValueError("技能包目录不存在")
             manifest = self._read_manifest(package)
@@ -467,12 +472,16 @@ class SkillMarket:
                     if item.get("name") == name:
                         item["installed"] = True
                         item["rsi_node_id"] = rsi_node
+                        item["package_sha256"] = package_sha256
+                        item["ct_receipt_hash"] = ct_receipt_hash
                         item["installed_at"] = datetime.now(timezone.utc).isoformat()
                         break
                 self._save()
             return {"name": name, "target": str(target),
                     "requirements_exists": True, "lock_exists": lockfile.exists(),
-                    "deps": deps, "rsi_node_id": rsi_node}
+                    "deps": deps,                     "rsi_node_id": rsi_node,
+                    "package_sha256": package_sha256,
+                    "ct_receipt_hash": ct_receipt_hash}
         finally:
             if tmp is not None:
                 tmp.cleanup()
@@ -558,10 +567,86 @@ class SkillMarket:
         path.write_text(json.dumps({"skills": skills}, ensure_ascii=False, indent=2),
                         encoding="utf-8")
 
+    def _ct_entry(self, name: str) -> tuple[dict[str, Any], str, str, str]:
+        entry = next((dict(i) for i in self._items if i.get("name") == name), None)
+        if not entry:
+            raise ValueError("市场中没有该技能")
+        sha = str(entry.get("package_sha256", ""))
+        ct_url = str(entry.get("ct_url", "")).strip()
+        ct_key = str(entry.get("ct_public_key", "")).strip()
+        if not sha or not ct_url:
+            raise ValueError("该技能未记录远端 CT 信息（请先从该源安装）")
+        if not ct_key:
+            raise ValueError("catalog 未配置 ct_public_key，无法验证 CT 回执")
+        return entry, sha, ct_url, ct_key
+
+    def ct_verify(self, name: str) -> dict[str, Any]:
+        with self._lock:
+            try:
+                entry, sha, ct_url, ct_key = self._ct_entry(name)
+            except ValueError as exc:
+                return {"ok": False, "reason": str(exc)}
+        try:
+            client = RemoteCtClient()
+            receipt = client.fetch(ct_url, sha)
+            if str(receipt.get("sha256", "")) != sha:
+                raise ValueError("CT 回执 sha256 与已安装技能包不一致")
+            if str(receipt.get("name", name)) != name:
+                raise ValueError("CT 回执 name 与技能名不一致")
+            ok = client.verify(receipt, ct_key)
+        except (ValueError, RuntimeError) as exc:
+            return {"ok": False, "reason": str(exc), "sha256": sha, "ct_url": ct_url}
+        return {
+            "ok": ok, "action": "verify", "name": name,
+            "sha256": sha, "ct_url": ct_url,
+            "reason": "CT 回执有效" if ok else "CT 回执无效",
+            "receipt_hash": hashlib.sha256(canonical(receipt).encode("utf-8")).hexdigest()
+                            if ok else "",
+            "receipt": receipt if ok else {},
+        }
+
+    def ct_anchor(self, name: str) -> dict[str, Any]:
+        with self._lock:
+            try:
+                entry, sha, ct_url, ct_key = self._ct_entry(name)
+            except ValueError as exc:
+                return {"ok": False, "reason": str(exc)}
+        payload = {"sha256": sha, "name": name,
+                   "catalog_url": str(entry.get("catalog_url", ""))}
+        try:
+            client = RemoteCtClient()
+            receipt = client.anchor(ct_url, payload)
+            if str(receipt.get("sha256", "")) != sha:
+                raise ValueError("CT 锚定回执 sha256 与目标技能包不一致")
+            if str(receipt.get("name", name)) != name:
+                raise ValueError("CT 锚定回执 name 与技能名不一致")
+            ok = client.verify(receipt, ct_key)
+        except (ValueError, RuntimeError) as exc:
+            return {"ok": False, "action": "anchor", "name": name,
+                    "sha256": sha, "ct_url": ct_url, "reason": str(exc)}
+        receipt_hash = hashlib.sha256(canonical(receipt).encode("utf-8")).hexdigest()
+        if ok:
+            with self._lock:
+                self._append_ct({"name": name, "sha256": sha, "ct_anchor": True,
+                                 "ct_url": ct_url,
+                                 "ct_key_fp": hashlib.sha256(
+                                     ct_key.encode("utf-8")).hexdigest()[:16],
+                                 "ct_receipt_hash": receipt_hash})
+        return {
+            "ok": ok, "action": "anchor", "name": name,
+            "sha256": sha, "ct_url": ct_url,
+            "reason": "CT 锚定成功" if ok else "CT 回执无效",
+            "receipt_hash": receipt_hash if ok else "",
+            "receipt": receipt if ok else {},
+        }
+
     def status(self) -> dict[str, Any]:
         items = self.list()
         for item in items:
             item.setdefault("source_type", "local")
+            item.setdefault("ct_url", "")
+            item.setdefault("package_sha256", "")
+            item.setdefault("ct_receipt_hash", "")
         ct_ok, ct_count = self.verify_ct()
         return {"catalog": str(self.catalog_path),
                 "sources": self.list_sources(),

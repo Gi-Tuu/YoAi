@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as openDir } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../lib/ipc";
-import type { SkillMarketStateMsg, SkillStateMsg } from "../types/ipc";
+import type { SkillCtResultMsg, SkillMarketStateMsg, SkillStateMsg } from "../types/ipc";
 
 export function SkillPage() {
   const [status, setStatus] = useState<SkillStateMsg["status"] | null>(null);
@@ -11,6 +11,7 @@ export function SkillPage() {
   const [text, setText] = useState("{\n  \"skills\": []\n}");
   const [notice, setNotice] = useState("");
   const [remoteUrl, setRemoteUrl] = useState("");
+  const [ctResult, setCtResult] = useState<SkillCtResultMsg["result"] | null>(null);
 
   const refresh = useCallback(() => {
     void ipc.getSkillStatus();
@@ -24,6 +25,7 @@ export function SkillPage() {
       if (m.type === "skill.market.state") setMarket(m.status);
       if (m.type === "skill.config") setText(m.text);
       if (m.type === "skill.ack") setNotice(m.message);
+      if (m.type === "skill.ct.result") setCtResult(m.result);
       if (m.type === "error" && m.stage === "skill") setNotice(m.message);
     });
     refresh();
@@ -43,6 +45,14 @@ export function SkillPage() {
         <button type="button" onClick={refresh}>↻ 刷新</button>
       </header>
       {notice && <div className="boundary-notice">{notice}</div>}
+      {ctResult && (
+        <div className="boundary-notice">
+          {ctResult.action === "anchor" ? "CT 锚定" : "CT 校验"}：
+          {ctResult.ok ? "通过" : "失败"} · {ctResult.reason}
+          {ctResult.sha256 ? ` · sha256=${ctResult.sha256.slice(0, 16)}` : ""}
+          {ctResult.receipt_hash ? ` · 回执=${ctResult.receipt_hash.slice(0, 12)}` : ""}
+        </div>
+      )}
 
       <section className="mcp-card" style={{ marginBottom: "var(--sp-3)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -59,15 +69,31 @@ export function SkillPage() {
             })()}>登记本地包</button>
           </div>
         </div>
+        <div className="mcp-meta">
+          本地透明日志：{market?.transparency?.entries ?? 0} 条 ·
+          {market?.transparency?.valid === false ? "校验失败" : "校验通过"}
+        </div>
         {(market?.items.length ?? 0) === 0 && <div className="side-empty">市场为空。可发布当前技能或登记本地包。</div>}
         {market?.items.map((item) => (
           <div key={item.name} className="mcp-server">
             <div><b>{item.name}</b><span>v{item.version}</span></div>
             <div className="mcp-meta">{item.description}</div>
             <div className="mcp-meta">来源：{item.source_type ?? "local"} · lock：{item.lock_exists ? "已生成" : "未生成"} · {item.source}</div>
+            {item.ct_url && (
+              <div className="mcp-meta">
+                远端 CT：已登记 · 包 sha256：{(item.package_sha256 || "未安装").slice(0, 16)}
+                {item.ct_receipt_hash ? ` · 回执：${item.ct_receipt_hash.slice(0, 12)}` : ""}
+              </div>
+            )}
             <div className="mcp-actions">
               <button type="button" onClick={() => void ipc.installMarketSkill(item.name)}>安装</button>
               <button type="button" onClick={() => void ipc.removeMarketSkill(item.name)}>移出市场</button>
+              {item.ct_url && item.package_sha256 && (
+                <>
+                  <button type="button" onClick={() => void ipc.verifySkillCt(item.name)}>校验远端 CT</button>
+                  <button type="button" onClick={() => void ipc.anchorSkillCt(item.name)}>锚定到远端 CT</button>
+                </>
+              )}
             </div>
           </div>
         ))}

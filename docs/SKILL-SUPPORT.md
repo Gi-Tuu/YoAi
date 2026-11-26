@@ -141,7 +141,34 @@ manifest 可声明：
 `market_install` / `market_publish` / `market_remove`。
 桌面「技能」页提供远程源地址、刷新远程、登记本地包、安装、发布、移出按钮。
 
+## R5 远端证书透明度（CT）
+
+远程 catalog 可为条目追加：
+
+```json
+{
+  "ct_url": "https://ct.example.org/log",
+  "ct_public_key": "-----BEGIN PUBLIC KEY-----..."
+}
+```
+
+- 远端公钥必须来自 catalog；**绝不采信回执自带的 public_key**，
+  若回执自带公钥则必须与 catalog 公钥一致，否则拒绝；
+- 回执包含 `sha256` / `name` / `root` / `proof` / `signature`；
+- leaf = SHA256(`0x00 || canonical(条目)`)，node = SHA256(`0x01 || left || right`)；
+- Merkle inclusion proof 校验条目确实进入 root；Ed25519 签名覆盖
+  "条目 + root + proof"，防止证明被掉包；
+- 安装远程包时若提供 `ct_url`，会先拉取回执并校验，失败直接拒绝安装；
+  只给 `ct_url` 不给 `ct_public_key` 也拒绝；
+- `校验远端 CT` 可随时复验；`锚定到远端 CT` 是显式 POST `/anchor`，
+  回执验签通过后才写入本地透明日志；
+- 本地透明日志仍是 append-only hash chain，`status.transparency` 给出
+  条目数与链是否完整。
+
+协议：`skill.ct_verify` / `skill.ct_anchor` / `skill.ct.result`。
+桌面「技能」页展示包 sha256、CT 回执指纹、透明日志状态与校验/锚定按钮。
+
 ## 明确未做
 
 - 自动下载未登记 URL；
-- 远端签名链 / 证书透明度校验（当前仅 Ed25519 单签）；
+- 公网 CT 服务的自建部署与跨客户端 gossip 审计（当前只校验外部 CT 回执）；

@@ -321,9 +321,11 @@ export interface SkillMarketStateMsg extends BaseMsg {
     catalog: string;
     sources: string[];
     packages_dir: string;
+    transparency?: { path: string; entries: number; valid: boolean };
     items: Array<{ name: string; version: string; description: string; source: string;
       source_type?: string; installed?: boolean; lock_exists?: boolean;
-      requirements_exists?: boolean }>;
+      requirements_exists?: boolean; package_sha256?: string; ct_url?: string;
+      ct_receipt_hash?: string; rsi_node_id?: string }>;
   };
 }
 
@@ -348,6 +350,15 @@ export interface SkillConfigMsg extends BaseMsg {
 export interface SkillAckMsg extends BaseMsg {
   type: "skill.ack";
   message: string;
+}
+
+export interface SkillCtResultMsg extends BaseMsg {
+  type: "skill.ct.result";
+  result: {
+    ok: boolean; reason: string; action?: "verify" | "anchor"; name?: string;
+    sha256?: string; ct_url?: string; receipt_hash?: string;
+    receipt?: Record<string, unknown>;
+  };
 }
 
 export interface McpStateMsg extends BaseMsg {
@@ -471,7 +482,8 @@ export type RuntimeMsg =
   | BoundaryStateMsg | RsiTriggeredMsg | RsiValidatedMsg | RsiPromotedMsg
   | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg
   | McpStateMsg | McpConfigMsg | McpAckMsg | SkillStateMsg | SkillConfigMsg
-  | SkillAckMsg | SkillMarketStateMsg | RsiMetaStateMsg | RsiMetaAckMsg;
+  | SkillAckMsg | SkillCtResultMsg | SkillMarketStateMsg
+  | RsiMetaStateMsg | RsiMetaAckMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -536,6 +548,8 @@ export type Command =
   | { v: 1; type: "skill.market_install"; name: string }
   | { v: 1; type: "skill.market_publish"; name: string }
   | { v: 1; type: "skill.market_remove"; name: string }
+  | { v: 1; type: "skill.ct_verify"; name: string }
+  | { v: 1; type: "skill.ct_anchor"; name: string }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

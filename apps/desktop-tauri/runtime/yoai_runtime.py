@@ -67,7 +67,8 @@ from protocol import (  # noqa: E402  (自举后导入)
     evolution_report, feedback_recorded, mcp_ack, mcp_config, mcp_state,
     message_updated, permission_state, ready, rsi_meta_ack, rsi_meta_state,
     rsi_promoted, rsi_rolled_back, rsi_triggered, rsi_validated, share_exported,
-    skill_ack, skill_config, skill_market_state, skill_state, snapshot, status,
+    skill_ack, skill_config, skill_ct_result, skill_market_state, skill_state,
+    snapshot, status,
     trial_report, trial_state,
 )
 
@@ -1262,6 +1263,21 @@ class Runtime:
                 await self.send(skill_ack(message=message))
                 await self.send(skill_market_state(status=self.skill_market.status()))
                 await self.send(skill_state(status=self.skill_store.status()))
+            except (ValueError, OSError, RuntimeError) as exc:
+                await self.send(error("skill", str(exc)))
+        elif typ in ("skill.ct_verify", "skill.ct_anchor"):
+            if self.skill_market is None:
+                await self.send(error("skill", "技能市场尚未初始化"))
+                return True
+            name = str(cmd.get("name", ""))
+            try:
+                action = (self.skill_market.ct_verify
+                          if typ == "skill.ct_verify"
+                          else self.skill_market.ct_anchor)
+                result = await asyncio.to_thread(action, name)
+                await self.send(skill_ct_result(result=result))
+                await self.send(skill_ack(message=result["reason"]))
+                await self.send(skill_market_state(status=self.skill_market.status()))
             except (ValueError, OSError, RuntimeError) as exc:
                 await self.send(error("skill", str(exc)))
         elif typ in ("skill.requirements_generate", "skill.lock_generate"):
