@@ -246,7 +246,7 @@ export interface ApprovalRequestMsg extends BaseMsg {
 
 export interface ErrorMsg extends BaseMsg {
   type: "error";
-  stage: "startup" | "runtime" | "protocol" | "file" | "browser" | "message" | "share";
+  stage: "startup" | "runtime" | "protocol" | "file" | "browser" | "message" | "share" | "mcp";
   message: string;
 }
 
@@ -313,6 +313,25 @@ export interface ApprovalRecordedMsg extends BaseMsg {
     node_id: string; from_state: string; to_state: string;
     changed: boolean; reason: string; verdict: string;
   };
+}
+
+export interface McpStateMsg extends BaseMsg {
+  type: "mcp.state";
+  status: {
+    config: string;
+    servers: Record<string, { running: boolean; server_info: Record<string, unknown>; stderr_tail: string[] }>;
+    tools: string[];
+  };
+}
+
+export interface McpConfigMsg extends BaseMsg {
+  type: "mcp.config";
+  text: string;
+}
+
+export interface McpAckMsg extends BaseMsg {
+  type: "mcp.ack";
+  message: string;
 }
 
 export interface RsiRolledBackMsg extends BaseMsg {
@@ -402,7 +421,8 @@ export type RuntimeMsg =
   | FileChangedMsg | BrowserOpenedMsg | FileTreeMsg | FileContentMsg
   | AttachmentReadyMsg | MessageUpdatedMsg | ShareExportedMsg | FeedbackRecordedMsg
   | BoundaryStateMsg | RsiTriggeredMsg | RsiValidatedMsg | RsiPromotedMsg
-  | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg;
+  | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg
+  | McpStateMsg | McpConfigMsg | McpAckMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -447,6 +467,10 @@ export type Command =
   | { v: 1; type: "rsi.promote_active"; trial_id: string; approved_by: string; reason?: string }
   | { v: 1; type: "rsi.reject"; trial_id: string; reason?: string }
   | { v: 1; type: "rsi.rollback"; node_id: string }
+  | { v: 1; type: "mcp.status" }
+  | { v: 1; type: "mcp.config_get" }
+  | { v: 1; type: "mcp.config_set"; text: string }
+  | { v: 1; type: "mcp.reload" }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

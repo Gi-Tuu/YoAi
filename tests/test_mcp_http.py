@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -74,6 +75,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"jsonrpc": "2.0", "id": rid, "result": {}})
 
+    def do_GET(self):  # noqa: N802
+        body = (
+            'id: evt-1\nevent: message\ndata: {"jsonrpc":"2.0",'
+            '"method":"notifications/tools/list_changed"}\n\n'
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_DELETE(self):  # noqa: N802
         Handler.deleted = True
         self.send_response(200)
@@ -107,6 +119,24 @@ def test_http_client_json_sse_and_session():
         assert Handler.seen_sessions and all(s == "sess-http-1" for s in Handler.seen_sessions)
         assert all(v == MCP_VERSION for v in Handler.seen_versions)
         assert Handler.deleted is True
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+
+def test_http_get_sse_notification():
+    server, thread, url = _serve()
+    try:
+        async def scenario():
+            seen = []
+            client = McpHttpClient("http", url, timeout=10)
+            client.on_notification = seen.append
+            await client.start()
+            await asyncio.sleep(1.2)
+            await client.close()
+            return seen
+        seen = asyncio.run(scenario())
+        assert any(m.get("method") == "notifications/tools/list_changed" for m in seen)
     finally:
         server.shutdown()
         thread.join(timeout=3)

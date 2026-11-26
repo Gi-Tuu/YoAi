@@ -575,6 +575,23 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
   color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent);
   border-radius: var(--radius-sm); }
 .boundary-trigger { display: block; margin-top: 4px; padding: 2px 7px; font-size: var(--fs-cap); }
+
+/* MCP 管理页 */
+.mcp-page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-6); }
+.mcp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.mcp-card { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: var(--sp-3); }
+.mcp-card h3 { margin: 0 0 var(--sp-2); font-size: 14px; font-weight: 500; }
+.mcp-server { border-top: 1px solid var(--rule); padding: var(--sp-2) 0; font-size: var(--fs-note); }
+.mcp-server > div:first-child { display: flex; justify-content: space-between; gap: var(--sp-2); }
+.mcp-on { color: var(--ok); }
+.mcp-off { color: var(--weak); }
+.mcp-meta { color: var(--dim); font-family: var(--font-mono); font-size: var(--fs-cap); word-break: break-all; }
+.mcp-stderr { max-height: 80px; overflow: auto; font-size: var(--fs-cap); color: var(--bad); background: var(--bg); }
+.mcp-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcp-tools code { padding: 2px 6px; border: 1px solid var(--rule); border-radius: var(--radius-sm); font-size: var(--fs-cap); }
+.mcp-config textarea { width: 100%; min-height: 220px; resize: vertical; background: var(--bg); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-note); }
+.mcp-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 .evo-trial-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--sp-1); }
 .evo-trial-actions .boundary-trigger { margin-top: 0; }
 

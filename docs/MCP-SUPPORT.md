@@ -11,6 +11,8 @@
 - **生命周期**：`initialize` → `notifications/initialized` → 正常操作 → 关闭 stdin 优雅退出，超时强杀；
 - **协议版本**：请求 `2025-06-18`（广泛兼容的稳定版本）；
 - **能力**：`tools/list`（支持 `nextCursor` 分页）、`tools/call`、`ping`；
+- **HTTP GET SSE**：后台订阅 server 主动通知，支持 `Last-Event-ID` 续传；
+  `notifications/tools/list_changed` 触发工具列表刷新；
 - **工具桥接**：外部工具注册为 Core `ToolSpec(source="mcp")`，名称 `mcp__<server>__<tool>`；
 - **权限**：MCP 工具走 Core `AllowlistPolicy` / 桌面审批通道，不绕过三档权限；
 - **配置热更新**：`mcp/servers.json` mtime 变化时自动重连并重建工具，不影响其它工具；
@@ -73,9 +75,17 @@ HTTP server 示例：
 - 坏 server / 坏工具不会让主对话失败，启动时打印到 stderr 并跳过；
 - 不支持 shell 展开、远程安装或自动下载 server；用户需自行准备好命令。
 
+## 管理页
+
+桌面端左侧新增「MCP」页：
+- 显示 server 运行状态、serverInfo、stderr 尾部；
+- 显示已注册 MCP 工具名；
+- 直接编辑 `servers.json` 并保存/重载；
+- 协议：`mcp.status` / `mcp.config_get` / `mcp.config_set` / `mcp.reload`。
+
 ## 明确未做
 
-- SSE GET 主动订阅（server 主动推送的独立流）；当前只在 POST 响应流里处理通知/响应，tools 场景足够；
+- 完整 OAuth 发现/授权流程（可通过 `headers` 手动提供 token）；
 - OAuth 自动发现与完整认证流程（可通过 `headers` 手动提供 token）；
 - resources / prompts / sampling / elicitation / logging 能力；
 - MCP server 的 UI 安装与管理页面；

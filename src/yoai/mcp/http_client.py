@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+import threading
+import time
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 from yoai.mcp.client import MCP_VERSION
 
@@ -65,6 +68,11 @@ class McpHttpClient:
         self.capabilities: dict[str, Any] = {}
         self._id = 0
         self._initialized = False
+        self.on_notification: Callable[[dict[str, Any]], None] | None = None
+        self._listen_thread: threading.Thread | None = None
+        self._listen_response = None
+        self._stop_listener = threading.Event()
+        self._last_event_id = ""
 
     @property
     def running(self) -> bool:
@@ -83,6 +91,7 @@ class McpHttpClient:
         self.server_info = dict(result.get("serverInfo") or {})
         await self.notify("notifications/initialized")
         self._initialized = True
+        self._start_listener()
 
     def _base_headers(self) -> dict[str, str]:
         headers = {
@@ -186,6 +195,69 @@ class McpHttpClient:
         await self.request("ping")
         return True
 
+    def _start_listener(self) -> None:
+        if self._listen_thread and self._listen_thread.is_alive():
+            return
+        self._stop_listener.clear()
+        self._listen_thread = threading.Thread(
+            target=self._listen_loop, name=f"mcp-sse-{self.name}", daemon=True)
+        self._listen_thread.start()
+
+    def _listen_loop(self) -> None:
+        """后台 GET SSE：接收 server 主动通知；405 表示 server 不支持，静止。"""
+        while not self._stop_listener.is_set():
+            try:
+                headers = {
+                    "Accept": "text/event-stream",
+                    "MCP-Protocol-Version": self.negotiated_version,
+                    **self.headers,
+                }
+                if self.session_id:
+                    headers["Mcp-Session-Id"] = self.session_id
+                if self._last_event_id:
+                    headers["Last-Event-ID"] = self._last_event_id
+                request = urllib.request.Request(self.url, headers=headers, method="GET")
+                response = urllib.request.urlopen(request, timeout=self.timeout)
+                self._listen_response = response
+                data_lines: list[str] = []
+                event_id = ""
+                for raw in response:
+                    if self._stop_listener.is_set():
+                        break
+                    line = raw.decode("utf-8", "replace").rstrip("\r\n")
+                    if line == "":
+                        payload = "\n".join(data_lines).strip()
+                        data_lines.clear()
+                        if payload and payload != "[DONE]":
+                            try:
+                                message = json.loads(payload)
+                            except ValueError:
+                                message = None
+                            if isinstance(message, dict):
+                                if event_id:
+                                    self._last_event_id = event_id
+                                if message.get("method"):
+                                    if self.on_notification:
+                                        self.on_notification(message)
+                                    else:
+                                        print(f"[mcp:{self.name}] {message.get('method')}",
+                                              file=sys.stderr, flush=True)
+                        event_id = ""
+                    elif line.startswith("id:"):
+                        event_id = line[3:].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                response.close()
+            except urllib.error.HTTPError as exc:
+                if exc.code == 405:
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                self._listen_response = None
+            if not self._stop_listener.is_set():
+                time.sleep(1)
+
     def _delete_sync(self) -> None:
         if not self.session_id:
             return
@@ -198,6 +270,13 @@ class McpHttpClient:
                 raise
 
     async def close(self) -> None:
+        self._stop_listener.set()
+        response = self._listen_response
+        if response is not None:
+            try:
+                response.close()
+            except Exception:  # noqa: BLE001
+                pass
         if self.session_id:
             try:
                 await asyncio.to_thread(self._delete_sync)

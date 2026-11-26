@@ -64,9 +64,10 @@ from protocol import (  # noqa: E402  (自举后导入)
     PROTOCOL_VERSION, Seq, approval_recorded, approval_request, archive_state,
     attachment_ready, boundary_state, browser_opened, chat_msg, chat_state,
     encode, error, event, file_changed, file_content, file_tree, final,
-    evolution_report, feedback_recorded, message_updated, permission_state,
-    ready, rsi_promoted, rsi_rolled_back, rsi_triggered, rsi_validated,
-    share_exported, snapshot, status, trial_report, trial_state,
+    evolution_report, feedback_recorded, mcp_ack, mcp_config, mcp_state,
+    message_updated, permission_state, ready, rsi_promoted, rsi_rolled_back,
+    rsi_triggered, rsi_validated, share_exported, snapshot, status,
+    trial_report, trial_state,
 )
 
 
@@ -1208,6 +1209,45 @@ class Runtime:
                 await self.send(self._archive_state())
             except (ValueError, RuntimeError) as exc:
                 await self.send(error("message", str(exc)))
+        elif typ == "mcp.status":
+            if self.mcp_manager is None:
+                await self.send(error("mcp", "MCP 管理器尚未初始化"))
+            else:
+                await self.send(mcp_state(status=self.mcp_manager.status()))
+        elif typ == "mcp.config_get":
+            if self.mcp_manager is None:
+                await self.send(error("mcp", "MCP 管理器尚未初始化"))
+            else:
+                path = self.mcp_manager.path
+                try:
+                    text = path.read_text(encoding="utf-8") if path.exists() else "{\"servers\": []}"
+                    await self.send(mcp_config(text=text))
+                except OSError as exc:
+                    await self.send(error("mcp", f"读取配置失败：{exc}"))
+        elif typ == "mcp.config_set":
+            if self.mcp_manager is None:
+                await self.send(error("mcp", "MCP 管理器尚未初始化"))
+                return True
+            text = str(cmd.get("text", ""))
+            try:
+                parsed = json.loads(text)
+                if not isinstance(parsed, dict) or not isinstance(parsed.get("servers", []), list):
+                    raise ValueError("配置需为含 servers 数组的对象")
+                path = self.mcp_manager.path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+                self.mcp_manager.refresh()
+                await self.send(mcp_ack(message="MCP 配置已保存并重载"))
+                await self.send(mcp_state(status=self.mcp_manager.status()))
+            except (ValueError, OSError) as exc:
+                await self.send(error("mcp", f"保存配置失败：{exc}"))
+        elif typ == "mcp.reload":
+            if self.mcp_manager is None:
+                await self.send(error("mcp", "MCP 管理器尚未初始化"))
+            else:
+                self.mcp_manager.refresh()
+                await self.send(mcp_ack(message="MCP 已重新加载"))
+                await self.send(mcp_state(status=self.mcp_manager.status()))
         elif typ == "rsi.rollback":
             try:
                 from yoai.evolution import EvolutionArchive, RollbackMonitor

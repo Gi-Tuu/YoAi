@@ -78,6 +78,7 @@ class McpManager:
         self._specs: list[ToolSpec] = []
         self._mtime: float | None = None
         self._closed = False
+        self._refresh_timer: threading.Timer | None = None
 
     # --- 配置 ---
     def _load_configs(self) -> list[McpServerConfig]:
@@ -161,6 +162,8 @@ class McpManager:
                     config.name, config.command, config.args,
                     env=config.env, cwd=config.cwd or None, timeout=self.timeout,
                 )
+            client.on_notification = lambda message, server=config.name: \
+                self._on_notification(server, message)
             try:
                 await client.start()
                 tools = await client.list_tools()
@@ -193,6 +196,27 @@ class McpManager:
         handler.__name__ = _tool_name(server, tool)
         handler.__doc__ = f"调用 MCP server {server} 的工具 {tool}。"
         return handler
+
+    def _on_notification(self, server: str, message: dict[str, Any]) -> None:
+        method = str(message.get("method", ""))
+        if method != "notifications/tools/list_changed":
+            print(f"[mcp:{server}] {method}", file=__import__("sys").stderr, flush=True)
+            return
+        with self._lock:
+            if self._refresh_timer is not None:
+                return
+            self._refresh_timer = threading.Timer(0.5, self._refresh_from_notification)
+            self._refresh_timer.daemon = True
+            self._refresh_timer.start()
+
+    def _refresh_from_notification(self) -> None:
+        with self._lock:
+            self._refresh_timer = None
+        try:
+            self.refresh()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mcp] refresh after notification failed: {exc}",
+                  file=__import__("sys").stderr, flush=True)
 
     def tool_specs(self) -> list[ToolSpec]:
         """按需刷新：配置没变时直接返回缓存，不重连 server。"""
@@ -245,6 +269,10 @@ class McpManager:
         if self._closed:
             return
         self._closed = True
+        with self._lock:
+            if self._refresh_timer is not None:
+                self._refresh_timer.cancel()
+                self._refresh_timer = None
         loop = self._loop
         if loop and loop.is_running():
             try:

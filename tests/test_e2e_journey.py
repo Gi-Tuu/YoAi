@@ -569,3 +569,36 @@ def test_rsi_rollback_command_reports_decision(tmp_path, monkeypatch):
     rolled = next(m for m in out if m["type"] == "rsi.rolled_back")
     assert rolled["decision"]["rolled_back"] is False
     assert any(m["type"] == "archive.state" for m in out)
+
+
+def test_mcp_management_commands(tmp_path):
+    """MCP 状态/配置/重载命令必须通过协议层可用。"""
+    from types import SimpleNamespace
+
+    calls = []
+    manager = SimpleNamespace(
+        path=tmp_path / "mcp" / "servers.json",
+        status=lambda: {"servers": {}, "tools": [], "config": str(tmp_path)},
+        refresh=lambda: calls.append("refresh"),
+    )
+    rt = make_runtime(store_dir=tmp_path)
+    rt.mcp_manager = manager
+    out = collect(rt)
+
+    run(rt.handle({"type": "mcp.status"}))
+    assert next(m for m in out if m["type"] == "mcp.state")["status"]["tools"] == []
+
+    out.clear()
+    run(rt.handle({"type": "mcp.config_get"}))
+    cfg = next(m for m in out if m["type"] == "mcp.config")
+    assert "servers" in cfg["text"]
+
+    out.clear()
+    run(rt.handle({"type": "mcp.config_set", "text": '{"servers": []}'}))
+    assert manager.path.read_text(encoding="utf-8") == '{"servers": []}'
+    assert any(m["type"] == "mcp.ack" for m in out)
+    assert calls == ["refresh"]
+
+    out.clear()
+    run(rt.handle({"type": "mcp.reload"}))
+    assert calls == ["refresh", "refresh"]

@@ -249,6 +249,21 @@ def rsi_triggered(*, decisions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def mcp_state(*, status: dict[str, Any]) -> dict[str, Any]:
+    """MCP server / tool 状态。"""
+    return {"v": PROTOCOL_VERSION, "type": "mcp.state", "status": status}
+
+
+def mcp_config(*, text: str) -> dict[str, Any]:
+    """MCP servers.json 原文。"""
+    return {"v": PROTOCOL_VERSION, "type": "mcp.config", "text": text}
+
+
+def mcp_ack(*, message: str) -> dict[str, Any]:
+    """MCP 配置写入/重载完成。"""
+    return {"v": PROTOCOL_VERSION, "type": "mcp.ack", "message": message}
+
+
 def boundary_state(*, report: dict[str, Any]) -> dict[str, Any]:
     """能力边界看板：按标签聚合的成功率、返工率与 Wilson 区间。"""
     return {

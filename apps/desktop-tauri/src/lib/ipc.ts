@@ -222,6 +222,18 @@ export class IpcClient {
   async checkRollback(nodeId: string): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "rsi.rollback", node_id: nodeId });
   }
+  async getMcpStatus(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "mcp.status" });
+  }
+  async getMcpConfig(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "mcp.config_get" });
+  }
+  async setMcpConfig(text: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "mcp.config_set", text });
+  }
+  async reloadMcp(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "mcp.reload" });
+  }
 
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });
