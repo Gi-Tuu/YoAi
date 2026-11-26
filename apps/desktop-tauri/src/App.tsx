@@ -19,6 +19,7 @@ import { CommsPage } from "./components/CommsPage";
 import { GalaxyPage } from "./components/GalaxyPage";
 import { BoundaryPage } from "./components/BoundaryPage";
 import { McpPage } from "./components/McpPage";
+import { SkillPage } from "./components/SkillPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
 import { MessageActions } from "./components/MessageActions";
 import { open as openFile, save as saveFile } from "@tauri-apps/plugin-dialog";
@@ -165,7 +166,7 @@ export default function App() {
   const [floating, setFloating] = useState(false);
   const savedWindow = useRef<Awaited<ReturnType<typeof shrinkWindow>> | null>(null);
   const changingWindow = useRef(false);
-  const [page, setPage] = useState<"chat" | "comms" | "galaxy" | "boundary" | "mcp">("chat");
+  const [page, setPage] = useState<"chat" | "comms" | "galaxy" | "boundary" | "mcp" | "skill">("chat");
   const [snap, setSnap] = useState<SnapshotMsg | null>(null);
   const [permission, setPermission] = useState<{
     level: PermissionLevel; description: string;
@@ -478,6 +479,8 @@ export default function App() {
                 onClick={() => setPage("boundary")}>边界</button>
         <button className={`nav-item ${page === "mcp" ? "active" : ""}`} title="MCP 扩展" aria-current={page === "mcp" ? "page" : undefined}
                 onClick={() => setPage("mcp")}>MCP</button>
+        <button className={`nav-item ${page === "skill" ? "active" : ""}`} title="技能包" aria-current={page === "skill" ? "page" : undefined}
+                onClick={() => setPage("skill")}>技能</button>
         <div className="nav-spacer" />
         <button className="nav-item ghost" title="切换纸墨主题" onClick={toggleTheme}>
           {theme === "light" ? "墨" : "纸"}
@@ -595,6 +598,7 @@ export default function App() {
         {page === "galaxy" && <GalaxyPage />}
         {page === "boundary" && <BoundaryPage />}
         {page === "mcp" && <McpPage />}
+        {page === "skill" && <SkillPage />}
       </div>
 
       {dialog?.kind === "rename" && (

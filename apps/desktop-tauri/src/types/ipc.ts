@@ -246,7 +246,7 @@ export interface ApprovalRequestMsg extends BaseMsg {
 
 export interface ErrorMsg extends BaseMsg {
   type: "error";
-  stage: "startup" | "runtime" | "protocol" | "file" | "browser" | "message" | "share" | "mcp";
+  stage: "startup" | "runtime" | "protocol" | "file" | "browser" | "message" | "share" | "mcp" | "skill";
   message: string;
 }
 
@@ -313,6 +313,25 @@ export interface ApprovalRecordedMsg extends BaseMsg {
     node_id: string; from_state: string; to_state: string;
     changed: boolean; reason: string; verdict: string;
   };
+}
+
+export interface SkillStateMsg extends BaseMsg {
+  type: "skill.state";
+  status: {
+    config: string;
+    skills: Array<{ name: string; description: string; prompt: string; tools: string[] }>;
+    tools: string[];
+  };
+}
+
+export interface SkillConfigMsg extends BaseMsg {
+  type: "skill.config";
+  text: string;
+}
+
+export interface SkillAckMsg extends BaseMsg {
+  type: "skill.ack";
+  message: string;
 }
 
 export interface McpStateMsg extends BaseMsg {
@@ -422,7 +441,7 @@ export type RuntimeMsg =
   | AttachmentReadyMsg | MessageUpdatedMsg | ShareExportedMsg | FeedbackRecordedMsg
   | BoundaryStateMsg | RsiTriggeredMsg | RsiValidatedMsg | RsiPromotedMsg
   | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg
-  | McpStateMsg | McpConfigMsg | McpAckMsg;
+  | McpStateMsg | McpConfigMsg | McpAckMsg | SkillStateMsg | SkillConfigMsg | SkillAckMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -471,6 +490,10 @@ export type Command =
   | { v: 1; type: "mcp.config_get" }
   | { v: 1; type: "mcp.config_set"; text: string }
   | { v: 1; type: "mcp.reload" }
+  | { v: 1; type: "skill.status" }
+  | { v: 1; type: "skill.config_get" }
+  | { v: 1; type: "skill.config_set"; text: string }
+  | { v: 1; type: "skill.reload" }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

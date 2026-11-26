@@ -234,6 +234,18 @@ export class IpcClient {
   async reloadMcp(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "mcp.reload" });
   }
+  async getSkillStatus(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.status" });
+  }
+  async getSkillConfig(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.config_get" });
+  }
+  async setSkillConfig(text: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.config_set", text });
+  }
+  async reloadSkills(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.reload" });
+  }
 
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });

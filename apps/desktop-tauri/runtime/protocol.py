@@ -249,6 +249,21 @@ def rsi_triggered(*, decisions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def skill_state(*, status: dict[str, Any]) -> dict[str, Any]:
+    """技能包状态。"""
+    return {"v": PROTOCOL_VERSION, "type": "skill.state", "status": status}
+
+
+def skill_config(*, text: str) -> dict[str, Any]:
+    """skills.json 原文。"""
+    return {"v": PROTOCOL_VERSION, "type": "skill.config", "text": text}
+
+
+def skill_ack(*, message: str) -> dict[str, Any]:
+    """技能配置写入/重载完成。"""
+    return {"v": PROTOCOL_VERSION, "type": "skill.ack", "message": message}
+
+
 def mcp_state(*, status: dict[str, Any]) -> dict[str, Any]:
     """MCP server / tool 状态。"""
     return {"v": PROTOCOL_VERSION, "type": "mcp.state", "status": status}

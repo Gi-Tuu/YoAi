@@ -66,8 +66,8 @@ from protocol import (  # noqa: E402  (自举后导入)
     encode, error, event, file_changed, file_content, file_tree, final,
     evolution_report, feedback_recorded, mcp_ack, mcp_config, mcp_state,
     message_updated, permission_state, ready, rsi_promoted, rsi_rolled_back,
-    rsi_triggered, rsi_validated, share_exported, snapshot, status,
-    trial_report, trial_state,
+    rsi_triggered, rsi_validated, share_exported, skill_ack, skill_config,
+    skill_state, snapshot, status, trial_report, trial_state,
 )
 
 
@@ -119,6 +119,7 @@ class Runtime:
         self.feedback_store: Any = None    # FeedbackStore（R0 用户反馈信号）
         self.trial_store: Any = None       # TrialStore（R3.2 试用批次）
         self.mcp_manager: Any = None       # McpManager（标准 MCP 客户端）
+        self.skill_store: Any = None       # SkillStore（技能包）
         self.router: Any = None            # ExpertRouter（trial scope 覆盖）
         self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
         self._write_lock = asyncio.Lock()
@@ -152,7 +153,9 @@ class Runtime:
         self.feedback_store = FeedbackStore(data_dir)
         self.trial_store = TrialStore(data_dir)
         from yoai.mcp import McpManager
+        from yoai.skills import SkillStore
         self.mcp_manager = McpManager(data_dir)
+        self.skill_store = SkillStore(data_dir)
         channel_cb = make_sidecar_channel(self._request_host)
         self.model_options = available_main_models()
         preferred = UserConfig(data_dir).load().get("desktop_model")
@@ -161,6 +164,7 @@ class Runtime:
         self.router = getattr(provider, "router", None)
         agent_kwargs_base = agent_kwargs(data_dir, channel=channel_cb)
         agent_kwargs_base["mcp_manager"] = self.mcp_manager
+        agent_kwargs_base["skill_store"] = self.skill_store
         def kwargs_for_session(session: Any) -> dict[str, Any] | None:
             """项目模式：给该会话的 agent 挂项目读写工具；聊天模式返回 None 用默认。"""
             if getattr(session, "mode", "chat") != "project":
@@ -1209,6 +1213,33 @@ class Runtime:
                 await self.send(self._archive_state())
             except (ValueError, RuntimeError) as exc:
                 await self.send(error("message", str(exc)))
+        elif typ == "skill.status":
+            if self.skill_store is None:
+                await self.send(error("skill", "技能库尚未初始化"))
+            else:
+                await self.send(skill_state(status=self.skill_store.status()))
+        elif typ == "skill.config_get":
+            if self.skill_store is None:
+                await self.send(error("skill", "技能库尚未初始化"))
+            else:
+                await self.send(skill_config(text=self.skill_store.config_text()))
+        elif typ == "skill.config_set":
+            if self.skill_store is None:
+                await self.send(error("skill", "技能库尚未初始化"))
+                return True
+            try:
+                self.skill_store.set_config(str(cmd.get("text", "")))
+                await self.send(skill_ack(message="技能配置已保存并重载"))
+                await self.send(skill_state(status=self.skill_store.status()))
+            except (ValueError, OSError) as exc:
+                await self.send(error("skill", f"保存配置失败：{exc}"))
+        elif typ == "skill.reload":
+            if self.skill_store is None:
+                await self.send(error("skill", "技能库尚未初始化"))
+            else:
+                self.skill_store.refresh()
+                await self.send(skill_ack(message="技能已重新加载"))
+                await self.send(skill_state(status=self.skill_store.status()))
         elif typ == "mcp.status":
             if self.mcp_manager is None:
                 await self.send(error("mcp", "MCP 管理器尚未初始化"))

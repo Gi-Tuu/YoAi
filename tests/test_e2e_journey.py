@@ -602,3 +602,29 @@ def test_mcp_management_commands(tmp_path):
     out.clear()
     run(rt.handle({"type": "mcp.reload"}))
     assert calls == ["refresh", "refresh"]
+
+
+def test_skill_management_commands(tmp_path):
+    """Skill 状态/配置/重载命令必须通过协议层可用。"""
+    from yoai.skills import SkillStore
+
+    rt = make_runtime(store_dir=tmp_path)
+    rt.skill_store = SkillStore(tmp_path)
+    out = collect(rt)
+
+    run(rt.handle({"type": "skill.status"}))
+    assert next(m for m in out if m["type"] == "skill.state")["status"]["skills"] == []
+
+    out.clear()
+    run(rt.handle({"type": "skill.config_get"}))
+    assert "skills" in next(m for m in out if m["type"] == "skill.config")["text"]
+
+    out.clear()
+    run(rt.handle({"type": "skill.config_set", "text": '{"skills": [{"name":"s"}]}'}))
+    assert any(m["type"] == "skill.ack" for m in out)
+    state = next(m for m in out if m["type"] == "skill.state")
+    assert [s["name"] for s in state["status"]["skills"]] == ["s"]
+
+    out.clear()
+    run(rt.handle({"type": "skill.reload"}))
+    assert any(m["type"] == "skill.ack" for m in out)

@@ -78,6 +78,7 @@ class YoAiAgent:
         channel: Any = None,
         policy: Any = None,
         mcp_manager: Any = None,
+        skill_store: Any = None,
         model_timeout: float | None = "env",  # type: ignore[assignment]
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
@@ -180,6 +181,10 @@ class YoAiAgent:
             from yoai.mcp import McpManager
             mcp_manager = McpManager(data_dir)
         self.mcp_manager = mcp_manager
+        if skill_store is None:
+            from yoai.skills import SkillStore
+            skill_store = SkillStore(data_dir)
+        self.skill_store = skill_store
         self._all_tool_specs = self._build_all_specs(
             builtin_tools, workspace_root, readonly_roots, project_root, project_name)
         self.core.register_tools(self._all_tool_specs)
@@ -256,6 +261,14 @@ class YoAiAgent:
             except Exception as exc:  # noqa: BLE001
                 import sys as _sys
                 print(f"[yoai] mcp discovery failed: {exc}", file=_sys.stderr, flush=True)
+        # Skills：配置化技能包，提供 skill_list / skill_load 元工具。
+        skill_store = getattr(self, "skill_store", None)
+        if skill_store is not None:
+            try:
+                specs = specs + skill_store.tool_specs()
+            except Exception as exc:  # noqa: BLE001
+                import sys as _sys
+                print(f"[yoai] skill discovery failed: {exc}", file=_sys.stderr, flush=True)
         # list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
         # request_capability 由 Core 的 discovery 机制注册为 meta_tool 并拦截处理。
         specs.append(self._build_list_tools_spec())

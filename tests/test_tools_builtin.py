@@ -30,7 +30,9 @@ def test_tool_registration(tmp_path):
             "web_search", "web_fetch"}.issubset(added)
     # off = 12 原有能力 + 4 新增（now/forget_fact/recent_events/forget_event，
     # 2026-11-24）+ 2 常驻 meta（list_tools/request_capability）
-    assert len(off.list_tools()) == 18
+    # + 2 Skill 元工具（skill_list/skill_load，2026-11-26）
+    assert len(off.list_tools()) == 20
+    assert {"skill_list", "skill_load"}.issubset(set(off.list_tools()))
 
 
 def test_file_write_read_and_gate(tmp_path):
