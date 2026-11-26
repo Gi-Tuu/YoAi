@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
+import shutil
+import subprocess
 import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+import pytest
 
 from yoai.skills import SkillMarket, SkillStore
 
@@ -24,7 +29,13 @@ def _package(tmp_path: Path) -> Path:
     return package
 
 
-def test_market_add_install_publish_remove(tmp_path):
+def _skip_deps(monkeypatch):
+    monkeypatch.setattr(SkillMarket, "install_dependencies",
+                        lambda self, name: {"ok": False, "reason": "test skip", "log": ""})
+
+
+def test_market_add_install_publish_remove(tmp_path, monkeypatch):
+    _skip_deps(monkeypatch)
     store = SkillStore(tmp_path)
     market = SkillMarket(tmp_path, store)
     package = _package(tmp_path)
@@ -38,6 +49,10 @@ def test_market_add_install_publish_remove(tmp_path):
     assert (tmp_path / "skills" / "demo" / "requirements.txt").exists()
     assert any(s["name"] == "demo" for s in store.status()["skills"])
     assert market.list()[0]["installed"] is True
+    assert installed["rsi_node_id"]
+    from yoai.evolution import EvolutionArchive
+    archive = EvolutionArchive(tmp_path / "evolution" / "evolution.json")
+    assert archive.get(installed["rsi_node_id"]).lifecycle == "candidate"
 
     published = market.publish("demo")
     assert Path(published["source"]).is_dir()
@@ -48,7 +63,8 @@ def test_market_add_install_publish_remove(tmp_path):
     assert market.list() == []
 
 
-def test_remote_market_install(tmp_path):
+def test_remote_market_install(tmp_path, monkeypatch):
+    _skip_deps(monkeypatch)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("skill.json", json.dumps({
@@ -102,3 +118,57 @@ def test_remote_market_install(tmp_path):
     finally:
         server.shutdown()
         thread.join(timeout=3)
+
+
+def test_install_dependencies_uses_lock_and_venv(tmp_path, monkeypatch):
+    store = SkillStore(tmp_path)
+    market = SkillMarket(tmp_path, store)
+    installed = tmp_path / "skills" / "demo"
+    installed.mkdir(parents=True, exist_ok=True)
+    (installed / "requirements.lock.txt").write_text("requests==2.31.0\n", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+    calls = []
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        if "-m" in command and "venv" in command:
+            venv_py = installed / ".venv" / "Scripts" / "python.exe"
+            venv_py.parent.mkdir(parents=True, exist_ok=True)
+            venv_py.write_bytes(b"")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = market.install_dependencies("demo")
+    assert result["ok"] is True and result["installed"] is True
+    assert any("requirements.lock.txt" in str(c) for c in calls)
+    assert (installed / "deps_install.log").exists()
+
+
+def test_remote_signature_verification(tmp_path, monkeypatch):
+    _skip_deps(monkeypatch)
+    if not shutil_which("openssl"):
+        pytest.skip("openssl not available")
+    key = tmp_path / "key.pem"
+    pub = tmp_path / "pub.pem"
+    subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(key)],
+                   check=True, capture_output=True)
+    subprocess.run(["openssl", "pkey", "-in", str(key), "-pubout", "-out", str(pub)],
+                   check=True, capture_output=True)
+    payload = b"signed-package"
+    payload_path = tmp_path / "payload.bin"
+    payload_path.write_bytes(payload)
+    signed = subprocess.run(
+        ["openssl", "pkeyutl", "-sign", "-inkey", str(key), "-rawin", "-in", str(payload_path)],
+        check=True, capture_output=True).stdout
+    public_text = pub.read_text(encoding="utf-8")
+    signature = base64.b64encode(signed).decode("ascii")
+
+    store = SkillStore(tmp_path)
+    market = SkillMarket(tmp_path, store)
+    market._verify_ed25519(payload, signature, public_text)
+    with pytest.raises(ValueError):
+        market._verify_ed25519(b"tampered", signature, public_text)
+
+
+def shutil_which(name: str) -> str | None:
+    return shutil.which(name)

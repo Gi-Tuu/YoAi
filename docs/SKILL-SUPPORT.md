@@ -120,15 +120,22 @@ manifest 可声明：
 
 ```json
 {"skills":[{"name":"demo","version":"1.0","description":"…",
- "url":"/demo.zip","sha256":"<sha256>","requirements":["requests>=2.31"],
- "lockfile_url":"/demo.lock.txt"}]}
+ "url":"/demo.zip","sha256":"<sha256>",
+ "signature":"<base64 ed25519>","public_key":"-----BEGIN PUBLIC KEY-----...",
+ "requirements":["requests>=2.31"],"lockfile_url":"/demo.lock.txt"}]}
 ```
 
 - 相对 URL 按 catalog 地址解析；
 - zip 包安全解压：拒绝绝对路径与 `..`；
 - `sha256` 存在时强制校验，不匹配直接拒绝；
+- `signature` + `public_key`（或 `public_key_url`）存在时，用 Ed25519 校验原始 zip 字节，
+  校验在解压前完成，失败直接拒绝；
 - requirements/lockfile 可由 catalog 提供，随包写入安装目录；
-- 不执行 pip 安装，不下载未登记 URL。
+- 安装后自动在技能自己的 `.venv` 中按 lockfile（无则 requirements）安装依赖，
+  日志写 `deps_install.log`；失败不破坏技能安装；
+- `skill_run` 优先使用技能 `.venv` 的 Python；
+- 技能安装后自动在 EvolutionArchive 创建 `candidate` 节点（tools/prompt/tags 来自 manifest），
+  写 `rsi_skill_candidate` 报告，不进路由、不晋升。
 
 协议：`skill.market_list` / `market_add` / `market_add_remote` / `market_refresh_remote` /
 `market_install` / `market_publish` / `market_remove`。
@@ -136,5 +143,5 @@ manifest 可声明：
 
 ## 明确未做
 
-- 自动 pip 安装与远端签名校验；
-- Skill 自动纳入 RSI 候选（后续可做）。
+- 自动下载未登记 URL；
+- 远端签名链 / 证书透明度校验（当前仅 Ed25519 单签）；

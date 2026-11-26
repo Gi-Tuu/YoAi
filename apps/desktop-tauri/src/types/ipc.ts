@@ -335,7 +335,7 @@ export interface SkillStateMsg extends BaseMsg {
       enforce_tools: boolean; scripts: Array<{ name: string; path: string; description: string; timeout: number }>;
       resources: string[] }>;
     dependencies: Record<string, { requirements: string; requirements_exists: boolean;
-      lock: string; lock_exists: boolean; inline: string[] }>;
+      lock: string; lock_exists: boolean; venv: string; venv_exists: boolean; inline: string[] }>;
     tools: string[];
   };
 }

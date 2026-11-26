@@ -198,8 +198,10 @@ class SkillStore:
         bundle = self._bundle_dir(name)
         req = self._requirements_source(skill)
         lock = bundle / "requirements.lock.txt"
+        venv = bundle / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         return {"requirements": str(req), "requirements_exists": req.exists(),
                 "lock": str(lock), "lock_exists": lock.exists(),
+                "venv": str(venv), "venv_exists": venv.exists(),
                 "inline": skill["requirements"]}
 
     def _build_specs(self, agent: Any = None) -> list[ToolSpec]:
@@ -236,9 +238,12 @@ class SkillStore:
             target = (bundle / spec["path"]).resolve()
             if not target.is_file() or bundle.resolve() not in target.parents:
                 return f"脚本路径非法：{spec['path']}"
+            venv_python = bundle / ".venv" / (
+                "Scripts/python.exe" if os.name == "nt" else "bin/python")
+            runner = str(venv_python) if venv_python.exists() else sys.executable
             try:
                 completed = subprocess.run(
-                    [sys.executable, str(target)], input=json.dumps(args or {}, ensure_ascii=False),
+                    [runner, str(target)], input=json.dumps(args or {}, ensure_ascii=False),
                     capture_output=True, text=True, timeout=spec["timeout"],
                     cwd=str(bundle), env=_safe_env(), check=False,
                 )

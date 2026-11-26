@@ -7,9 +7,13 @@ requirements / lockfile 随 catalog 或包写入安装目录。
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import urllib.error
@@ -119,6 +123,33 @@ class SkillMarket:
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise RuntimeError(f"下载失败：{url}（{exc}）") from exc
 
+    @staticmethod
+    def _verify_ed25519(data: bytes, signature_b64: str, public_key_pem: str) -> None:
+        openssl = shutil.which("openssl")
+        if not openssl:
+            raise RuntimeError("catalog 要求签名校验，但本机未找到 openssl")
+        try:
+            signature = base64.b64decode(signature_b64, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("signature 不是合法 base64") from exc
+        with tempfile.TemporaryDirectory(prefix="yoai-skill-verify-") as tmp:
+            data_path = Path(tmp) / "package.bin"
+            sig_path = Path(tmp) / "package.sig"
+            key_path = Path(tmp) / "public.pem"
+            data_path.write_bytes(data)
+            sig_path.write_bytes(signature)
+            key_path.write_text(public_key_pem, encoding="utf-8")
+            try:
+                completed = subprocess.run(
+                    [openssl, "pkeyutl", "-verify", "-pubin", "-inkey", str(key_path),
+                     "-rawin", "-in", str(data_path), "-sigfile", str(sig_path)],
+                    capture_output=True, text=True, timeout=30, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError(f"签名校验失败：{exc}") from exc
+        if completed.returncode != 0:
+            raise ValueError(f"签名校验失败：{(completed.stderr or '').strip()[:300]}")
+
     def refresh_remote(self) -> list[dict[str, Any]]:
         merged = [i for i in self._items if i.get("source_type") != "remote"]
         for source in self.list_sources():
@@ -141,6 +172,10 @@ class SkillMarket:
                     "source_type": "remote",
                     "catalog_url": source,
                     "sha256": str(item.get("sha256", "")),
+                    "signature": str(item.get("signature", "")),
+                    "public_key": str(item.get("public_key", "")),
+                    "public_key_url": self._abs_url(
+                        str(item.get("public_key_url", "")), source),
                     "requirements": [str(r) for r in (item.get("requirements") or [])],
                     "lockfile_url": self._abs_url(str(item.get("lockfile_url", "")), source),
                     "lockfile": str(item.get("lockfile", "")),
@@ -188,6 +223,15 @@ class SkillMarket:
         expected = str(entry.get("sha256", "")).strip().lower()
         if expected and hashlib.sha256(data).hexdigest() != expected:
             raise ValueError("远程技能包 sha256 校验失败")
+        signature = str(entry.get("signature", "")).strip()
+        if signature:
+            public_key = str(entry.get("public_key", "")).strip()
+            key_url = str(entry.get("public_key_url", "")).strip()
+            if not public_key and key_url:
+                public_key = self._fetch_bytes(key_url).decode("utf-8", "replace")
+            if not public_key:
+                raise ValueError("catalog 提供签名但缺少 public_key")
+            self._verify_ed25519(data, signature, public_key)
         dest = Path(tmp.name) / "package"
         dest.mkdir(parents=True, exist_ok=True)
         self._extract_zip(data, dest)
@@ -207,6 +251,55 @@ class SkillMarket:
         if lock_url and not lockfile.exists():
             lockfile.write_bytes(self._fetch_bytes(lock_url))
         return dest
+
+    @staticmethod
+    def _venv_python(venv: Path) -> Path:
+        if os.name == "nt":
+            return venv / "Scripts" / "python.exe"
+        return venv / "bin" / "python"
+
+    def install_dependencies(self, name: str) -> dict[str, Any]:
+        """在技能自己的 venv 中安装依赖；失败只记录日志，不破坏技能安装。"""
+        target = self.root / name
+        requirements = target / ("requirements.lock.txt"
+                                 if (target / "requirements.lock.txt").exists()
+                                 else "requirements.txt")
+        log_path = target / "deps_install.log"
+        if not requirements.exists():
+            return {"ok": False, "reason": "没有 requirements/lockfile", "log": str(log_path)}
+        venv = target / ".venv"
+        uv = shutil.which("uv")
+        commands: list[list[str]] = []
+        if uv:
+            commands = [
+                [uv, "venv", str(venv)],
+                [uv, "pip", "install", "--python", str(self._venv_python(venv)),
+                 "-r", str(requirements)],
+            ]
+        else:
+            commands = [
+                [sys.executable, "-m", "venv", str(venv)],
+                [str(self._venv_python(venv)), "-m", "pip", "install", "-r",
+                 str(requirements)],
+            ]
+        logs: list[str] = []
+        try:
+            for command in commands:
+                completed = subprocess.run(
+                    command, cwd=str(target), capture_output=True, text=True,
+                    timeout=300, check=False,
+                )
+                logs.append(f"$ {' '.join(command)}\n{completed.stdout}\n{completed.stderr}")
+                if completed.returncode != 0:
+                    raise RuntimeError(f"命令失败：{completed.returncode}")
+            ok = True
+            reason = f"已安装到 {venv}"
+        except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            ok = False
+            reason = str(exc)
+        log_path.write_text("\n".join(logs), encoding="utf-8")
+        return {"ok": ok, "reason": reason, "log": str(log_path),
+                "venv": str(venv), "installed": self._venv_python(venv).exists()}
 
     def add_local(self, source: str | Path) -> dict[str, Any]:
         package = Path(source).expanduser().resolve()
@@ -228,7 +321,33 @@ class SkillMarket:
             self._save()
         return entry
 
-    def install(self, name: str) -> dict[str, Any]:
+    def _rsi_candidate(self, name: str, manifest: dict[str, Any]) -> str:
+        """把技能能力映射成 RSI 候选节点；只入档案、不进路由。"""
+        from yoai.evolution import EvolutionArchive, EvolutionReportStore, ExpertSpec
+        archive = EvolutionArchive(self.root.parent / "evolution" / "evolution.json")
+        root = archive.root or archive.create_root("通用根", ExpertSpec())
+        spec = ExpertSpec(
+            tools=tuple(str(t) for t in (manifest.get("tools") or [])),
+            prompt_suffix=str(manifest.get("prompt", "")),
+            capability_tags=(name,),
+        )
+        node = archive.create_child(
+            root.id, f"skill:{name}", spec,
+            diff={"dimension": "skill_integration", "skill": name,
+                  "source": "market_install", "reason": "技能安装后自动纳入 RSI 候选"},
+        )
+        reports = EvolutionReportStore(self.root.parent)
+        reports.add({
+            "id": f"skill-candidate-{node.id}", "evidence_id": "",
+            "triggered": True, "cause": "rsi_skill_candidate",
+            "new_node_id": node.id,
+            "reason": f"技能 {name} 安装后自动创建候选；未进路由、未晋升",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "kind": "rsi_skill_candidate", "skill": name,
+        })
+        return node.id
+
+    def install(self, name: str, *, auto_install_deps: bool = True) -> dict[str, Any]:
         with self._lock:
             entry = next((dict(i) for i in self._items if i.get("name") == name), None)
         if entry is None:
@@ -260,19 +379,23 @@ class SkillMarket:
                 requirements.write_text("\n".join(str(r) for r in inline) + "\n",
                                         encoding="utf-8")
             lockfile = target / "requirements.lock.txt"
+            deps = self.install_dependencies(name) if auto_install_deps else None
 
             self._upsert_skill_manifest(manifest, requirements_exists=True,
                                         lock_exists=lockfile.exists())
+            rsi_node = self._rsi_candidate(name, manifest)
             self.store.refresh()
             with self._lock:
                 for item in self._items:
                     if item.get("name") == name:
                         item["installed"] = True
+                        item["rsi_node_id"] = rsi_node
                         item["installed_at"] = datetime.now(timezone.utc).isoformat()
                         break
                 self._save()
             return {"name": name, "target": str(target),
-                    "requirements_exists": True, "lock_exists": lockfile.exists()}
+                    "requirements_exists": True, "lock_exists": lockfile.exists(),
+                    "deps": deps, "rsi_node_id": rsi_node}
         finally:
             if tmp is not None:
                 tmp.cleanup()

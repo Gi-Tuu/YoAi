@@ -1240,7 +1240,10 @@ class Runtime:
                     message = f"远程市场已刷新：{len(items)} 条"
                 elif typ == "skill.market_install":
                     result = await asyncio.to_thread(self.skill_market.install, name)
-                    message = f"已安装技能：{name}（lock={result['lock_exists']}）"
+                    deps = result.get("deps") or {}
+                    dep_text = "依赖已装" if deps.get("ok") else "依赖未装"
+                    message = (f"已安装技能：{name}（lock={result['lock_exists']}，"
+                               f"{dep_text}，RSI 候选={result['rsi_node_id']}）")
                 elif typ == "skill.market_publish":
                     result = self.skill_market.publish(name)
                     message = f"已发布技能：{name}（lock={result['lock_exists']}）"
