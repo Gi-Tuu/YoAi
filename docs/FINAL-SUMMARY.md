@@ -1,8 +1,9 @@
 # YoAi 审查 · 评测基线 · 记忆层改造 — 最终成果总览
 
 > 周期：2026-11-21 ~ 2026-11-22（主体，105 项任务全部完成）；
-> 2026-11-24 产品能力补全（工具/渲染/过程可见/流式），见第九节。
-> 测试数已随产品能力增长至 **288 passed**，成绩口径不变（仍能复现）。
+> 2026-11-24 产品能力补全（工具/渲染/过程可见/流式），见第九节；
+> 2026-11-25 ~ 11-26 桌面端切换 Tauri 2、RSI 闭环与扩展体系（MCP/Skill），见第十节。
+> 测试数已随产品与扩展能力增长至 **324 passed + 1 skipped**（前端 28 passed），成绩口径不变（仍能复现）。
 > 模型：算里 `deepseek/deepseek-v4.1-flash-1017`（免费；用户确认额度近乎无限，
 > 故所有实验按"用量非约束"设计，关键结论均全量 500 题验证）
 > 口径声明：anscheck prompt / yes-no 判定逐字保留官方，**judge 由 gpt-4o 替换为 deepseek**
@@ -140,6 +141,7 @@ bug 修复 + 全量 500 题，即真实对话形态的最终成绩。
 ## 六、验证记录（真跑）
 
 - 全量 pytest：**主体阶段 188 passed** → 产品能力补全后 **288 passed**（2026-11-24）
+  → Tauri/RSI/扩展体系后 **324 passed + 1 skipped**（2026-11-26）
 - 原 Core：主体阶段零改动；2026-11-24 thinking 透传分支 d4a2204 已合并进 Core main
 - 所有文档 UTF-8 无 BOM、乱码 0
 - 关键 A/B 均全量 500 题 + McNemar 检验（不是小样本）
@@ -212,3 +214,23 @@ exe 22:38 重打包自检通过。
 
 **口径澄清**：这些是产品体验/工程能力，**不改变第 2/8 节的评测成绩**——
 87.2% 仍是生产形态权威分数；成绩口径与产品能力分开陈述，勿混为一谈。
+
+---
+
+## 十、2026-11-25 ~ 11-26 桌面端与扩展体系（当前状态）
+
+主体评测结束后，产品层进入「桌面可用性 + 可进化 + 可扩展」阶段。成绩口径不变，
+以下均为工程与产品能力，不覆盖第 2/8 节的 87.2% 权威分数。
+
+| 方向 | 当前能力 | 文档 |
+|---|---|---|
+| 桌面端 | PySide6 旧端已删除；Tauri 2 成为唯一入口，Python runtime 走 JSONL IPC v1；会话/项目/权限/产物卡片/行级 diff/右侧浏览器·终端·查看文件三格均已落地 | `OLD-UI-MIGRATION.md` / `TOOL-DOCK.md` / `PROJECT-MODE.md` |
+| 消息交互 | 附件文本抽取；用户专有=编辑/撤回提问，智能体专有=重新生成/停止/思考/产物，两者都有=复制/分享；撤回/编辑为软删除+分支，不改写 Core 历史 | `MESSAGE-ACTIONS-DESIGN.md` |
+| RSI 闭环 | R0 反馈信号 → R1 能力边界看板 → R2.1 shadow 触发 → R2.2 child/parent 隔离验证 → R3.1/3.2/3.3 晋升·试用·人工批准·回滚 → R4 元策略 → R5 远端 CT；自动触发默认关，improved 只进 probation，retired 终态 | `RSI-PRODUCT-RESEARCH.md` / `RSI-PROMOTION-PLAN.md` / `RSI-META-RECURSION.md` / `SKILL-SUPPORT.md` |
+| 扩展体系 | MCP 走标准 JSON-RPC（stdio + Streamable HTTP + GET SSE）与桌面管理页；Skill 支持脚本包/资源包/强制工具白名单、requirements/lockfile、本地与远程市场、自动 venv 依赖、安装后自动建 RSI candidate | `MCP-SUPPORT.md` / `SKILL-SUPPORT.md` |
+| 安全边界 | 插件/MCP/Skill 工具全部走 Core 权限审批；签名链 root→signer；远端 CT 公钥只信 catalog，回执自带公钥不一致即拒绝；安装前复验 sha256/签名/Merkle proof；`ct_anchor` 必须显式调用 | `SKILL-SUPPORT.md` / `RSI-META-RECURSION.md` |
+| 工程状态 | Python 324 passed + 1 skipped，前端 28 passed；runtime 五副本 hash 一致；dist exe 已重打包（sha256 `35501023…`）；提交 `84d273c` 已 push | `PROJECT-LEDGER-STATUS.md` |
+
+**当前判断**：架构骨架和工程闭环已经齐备，RSI 的产品收益仍需真实使用数据验证；
+边界看板某标签样本 ≥20 且状态 weak 才生成候选，没有 weak 不硬造候选。
+R4 元策略只调阈值/权重，不改审计、人工批准、回滚硬条件与签名/依赖隔离。
