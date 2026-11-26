@@ -1,22 +1,26 @@
 /** 技能包管理页：查看 skills.json 定义的技能与工具。 */
 
 import { useCallback, useEffect, useState } from "react";
+import { open as openDir } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../lib/ipc";
-import type { SkillStateMsg } from "../types/ipc";
+import type { SkillMarketStateMsg, SkillStateMsg } from "../types/ipc";
 
 export function SkillPage() {
   const [status, setStatus] = useState<SkillStateMsg["status"] | null>(null);
+  const [market, setMarket] = useState<SkillMarketStateMsg["status"] | null>(null);
   const [text, setText] = useState("{\n  \"skills\": []\n}");
   const [notice, setNotice] = useState("");
 
   const refresh = useCallback(() => {
     void ipc.getSkillStatus();
     void ipc.getSkillConfig();
+    void ipc.getSkillMarket();
   }, []);
 
   useEffect(() => {
     const off = ipc.onMessage((m) => {
       if (m.type === "skill.state") setStatus(m.status);
+      if (m.type === "skill.market.state") setMarket(m.status);
       if (m.type === "skill.config") setText(m.text);
       if (m.type === "skill.ack") setNotice(m.message);
       if (m.type === "error" && m.stage === "skill") setNotice(m.message);
@@ -39,6 +43,28 @@ export function SkillPage() {
       </header>
       {notice && <div className="boundary-notice">{notice}</div>}
 
+      <section className="mcp-card" style={{ marginBottom: "var(--sp-3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3>本地技能市场（{market?.items.length ?? 0}）</h3>
+          <button type="button" onClick={() => void (async () => {
+            const picked = await openDir({ directory: true, multiple: false, title: "选择技能包目录" });
+            if (picked && typeof picked === "string") await ipc.addSkillMarket(picked);
+          })()}>登记本地包</button>
+        </div>
+        {(market?.items.length ?? 0) === 0 && <div className="side-empty">市场为空。可发布当前技能或登记本地包。</div>}
+        {market?.items.map((item) => (
+          <div key={item.name} className="mcp-server">
+            <div><b>{item.name}</b><span>v{item.version}</span></div>
+            <div className="mcp-meta">{item.description}</div>
+            <div className="mcp-meta">lock：{item.lock_exists ? "已生成" : "未生成"} · {item.source}</div>
+            <div className="mcp-actions">
+              <button type="button" onClick={() => void ipc.installMarketSkill(item.name)}>安装</button>
+              <button type="button" onClick={() => void ipc.removeMarketSkill(item.name)}>移出市场</button>
+            </div>
+          </div>
+        ))}
+      </section>
+
       <div className="mcp-grid">
         <section className="mcp-card">
           <h3>可用技能（{skills.length}）</h3>
@@ -56,6 +82,7 @@ export function SkillPage() {
               <div className="mcp-actions">
                 <button type="button" onClick={() => void ipc.generateSkillRequirements(skill.name)}>生成 requirements</button>
                 <button type="button" onClick={() => void ipc.generateSkillLock(skill.name)}>生成 lockfile</button>
+                <button type="button" onClick={() => void ipc.publishMarketSkill(skill.name)}>发布到市场</button>
               </div>
               <pre className="mcp-stderr">{skill.prompt}</pre>
             </div>

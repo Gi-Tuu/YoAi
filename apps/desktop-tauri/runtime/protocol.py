@@ -249,6 +249,11 @@ def rsi_triggered(*, decisions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def skill_market_state(*, status: dict[str, Any]) -> dict[str, Any]:
+    """本地 Skill 市场目录。"""
+    return {"v": PROTOCOL_VERSION, "type": "skill.market.state", "status": status}
+
+
 def skill_state(*, status: dict[str, Any]) -> dict[str, Any]:
     """技能包状态。"""
     return {"v": PROTOCOL_VERSION, "type": "skill.state", "status": status}

@@ -315,6 +315,16 @@ export interface ApprovalRecordedMsg extends BaseMsg {
   };
 }
 
+export interface SkillMarketStateMsg extends BaseMsg {
+  type: "skill.market.state";
+  status: {
+    catalog: string;
+    packages_dir: string;
+    items: Array<{ name: string; version: string; description: string; source: string;
+      installed?: boolean; lock_exists?: boolean; requirements_exists?: boolean }>;
+  };
+}
+
 export interface SkillStateMsg extends BaseMsg {
   type: "skill.state";
   status: {
@@ -445,7 +455,8 @@ export type RuntimeMsg =
   | AttachmentReadyMsg | MessageUpdatedMsg | ShareExportedMsg | FeedbackRecordedMsg
   | BoundaryStateMsg | RsiTriggeredMsg | RsiValidatedMsg | RsiPromotedMsg
   | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg
-  | McpStateMsg | McpConfigMsg | McpAckMsg | SkillStateMsg | SkillConfigMsg | SkillAckMsg;
+  | McpStateMsg | McpConfigMsg | McpAckMsg | SkillStateMsg | SkillConfigMsg
+  | SkillAckMsg | SkillMarketStateMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -500,6 +511,11 @@ export type Command =
   | { v: 1; type: "skill.reload" }
   | { v: 1; type: "skill.requirements_generate"; name: string }
   | { v: 1; type: "skill.lock_generate"; name: string }
+  | { v: 1; type: "skill.market_list" }
+  | { v: 1; type: "skill.market_add"; source: string }
+  | { v: 1; type: "skill.market_install"; name: string }
+  | { v: 1; type: "skill.market_publish"; name: string }
+  | { v: 1; type: "skill.market_remove"; name: string }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

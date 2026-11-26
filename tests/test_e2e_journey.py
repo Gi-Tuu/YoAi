@@ -628,3 +628,36 @@ def test_skill_management_commands(tmp_path):
     out.clear()
     run(rt.handle({"type": "skill.reload"}))
     assert any(m["type"] == "skill.ack" for m in out)
+
+
+def test_skill_market_commands(tmp_path):
+    """市场命令必须通过协议层可调用。"""
+    import json
+    from yoai.skills import SkillMarket, SkillStore
+
+    store = SkillStore(tmp_path)
+    market = SkillMarket(tmp_path, store)
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "skill.json").write_text(json.dumps({
+        "name": "m", "prompt": "p", "requirements": [],
+    }), encoding="utf-8")
+
+    rt = make_runtime(store_dir=tmp_path)
+    rt.skill_store = store
+    rt.skill_market = market
+    out = collect(rt)
+
+    run(rt.handle({"type": "skill.market_add", "source": str(package)}))
+    state = next(m for m in out if m["type"] == "skill.market.state")
+    assert [i["name"] for i in state["status"]["items"]] == ["m"]
+
+    out.clear()
+    run(rt.handle({"type": "skill.market_install", "name": "m"}))
+    assert any(m["type"] == "skill.ack" for m in out)
+    assert any(m["type"] == "skill.state" for m in out)
+
+    out.clear()
+    run(rt.handle({"type": "skill.market_remove", "name": "m"}))
+    state = next(m for m in out if m["type"] == "skill.market.state")
+    assert state["status"]["items"] == []

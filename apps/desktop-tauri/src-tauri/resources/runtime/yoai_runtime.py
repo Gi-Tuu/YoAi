@@ -67,7 +67,7 @@ from protocol import (  # noqa: E402  (自举后导入)
     evolution_report, feedback_recorded, mcp_ack, mcp_config, mcp_state,
     message_updated, permission_state, ready, rsi_promoted, rsi_rolled_back,
     rsi_triggered, rsi_validated, share_exported, skill_ack, skill_config,
-    skill_state, snapshot, status, trial_report, trial_state,
+    skill_market_state, skill_state, snapshot, status, trial_report, trial_state,
 )
 
 
@@ -120,6 +120,7 @@ class Runtime:
         self.trial_store: Any = None       # TrialStore（R3.2 试用批次）
         self.mcp_manager: Any = None       # McpManager（标准 MCP 客户端）
         self.skill_store: Any = None       # SkillStore（技能包）
+        self.skill_market: Any = None      # SkillMarket（本地技能市场）
         self.router: Any = None            # ExpertRouter（trial scope 覆盖）
         self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
         self._write_lock = asyncio.Lock()
@@ -153,9 +154,10 @@ class Runtime:
         self.feedback_store = FeedbackStore(data_dir)
         self.trial_store = TrialStore(data_dir)
         from yoai.mcp import McpManager
-        from yoai.skills import SkillStore
+        from yoai.skills import SkillMarket, SkillStore
         self.mcp_manager = McpManager(data_dir)
         self.skill_store = SkillStore(data_dir)
+        self.skill_market = SkillMarket(data_dir, self.skill_store)
         channel_cb = make_sidecar_channel(self._request_host)
         self.model_options = available_main_models()
         preferred = UserConfig(data_dir).load().get("desktop_model")
@@ -1213,6 +1215,35 @@ class Runtime:
                 await self.send(self._archive_state())
             except (ValueError, RuntimeError) as exc:
                 await self.send(error("message", str(exc)))
+        elif typ == "skill.market_list":
+            if self.skill_market is None:
+                await self.send(error("skill", "技能市场尚未初始化"))
+            else:
+                await self.send(skill_market_state(status=self.skill_market.status()))
+        elif typ in ("skill.market_add", "skill.market_install",
+                     "skill.market_publish", "skill.market_remove"):
+            if self.skill_market is None:
+                await self.send(error("skill", "技能市场尚未初始化"))
+                return True
+            name = str(cmd.get("name", ""))
+            try:
+                if typ == "skill.market_add":
+                    result = self.skill_market.add_local(str(cmd.get("source", "")))
+                    message = f"已登记技能：{result['name']}"
+                elif typ == "skill.market_install":
+                    result = self.skill_market.install(name)
+                    message = f"已安装技能：{name}（lock={result['lock_exists']}）"
+                elif typ == "skill.market_publish":
+                    result = self.skill_market.publish(name)
+                    message = f"已发布技能：{name}（lock={result['lock_exists']}）"
+                else:
+                    removed = self.skill_market.remove(name)
+                    message = f"已从市场移除：{name}" if removed else f"市场中没有：{name}"
+                await self.send(skill_ack(message=message))
+                await self.send(skill_market_state(status=self.skill_market.status()))
+                await self.send(skill_state(status=self.skill_store.status()))
+            except (ValueError, OSError, RuntimeError) as exc:
+                await self.send(error("skill", str(exc)))
         elif typ in ("skill.requirements_generate", "skill.lock_generate"):
             if self.skill_store is None:
                 await self.send(error("skill", "技能库尚未初始化"))

@@ -252,6 +252,21 @@ export class IpcClient {
   async generateSkillLock(name: string): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "skill.lock_generate", name });
   }
+  async getSkillMarket(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.market_list" });
+  }
+  async addSkillMarket(source: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.market_add", source });
+  }
+  async installMarketSkill(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.market_install", name });
+  }
+  async publishMarketSkill(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.market_publish", name });
+  }
+  async removeMarketSkill(name: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "skill.market_remove", name });
+  }
 
   async shutdown(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "shutdown" });

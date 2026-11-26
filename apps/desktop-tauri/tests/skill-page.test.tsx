@@ -11,6 +11,7 @@ import { ipc } from "../src/lib/ipc";
 describe("技能页", () => {
   it("显示技能并可保存配置", async () => {
     const setConfig = vi.spyOn(ipc, "setSkillConfig").mockResolvedValue();
+    const install = vi.spyOn(ipc, "installMarketSkill").mockResolvedValue();
     render(<SkillPage />);
     await act(async () => {
       ipc.inject({ v: 1, type: "skill.state", status: {
@@ -22,6 +23,11 @@ describe("技能页", () => {
         tools: ["skill_load", "skill_list", "skill_run", "skill_resource_read"],
       } });
       ipc.inject({ v: 1, type: "skill.config", text: '{"skills": []}' });
+      ipc.inject({ v: 1, type: "skill.market.state", status: {
+        catalog: "catalog", packages_dir: "pkgs",
+        items: [{ name: "market-demo", version: "1.0", description: "市场技能",
+          source: "source", lock_exists: true }],
+      } });
       await new Promise((r) => setTimeout(r, 50));
     });
     await waitFor(() => expect(screen.getByText("research")).toBeTruthy());
@@ -29,5 +35,10 @@ describe("技能页", () => {
     fireEvent.change(screen.getByLabelText("技能配置"), { target: { value: '{"skills": [1]}' } });
     fireEvent.click(screen.getByText("保存并重载"));
     expect(setConfig).toHaveBeenCalledWith('{"skills": [1]}');
+    expect(screen.getByText("market-demo")).toBeTruthy();
+    const installButton = screen.getAllByText("安装")[0];
+    if (!installButton) throw new Error("install button missing");
+    fireEvent.click(installButton);
+    expect(install).toHaveBeenCalledWith("market-demo");
   });
 });
