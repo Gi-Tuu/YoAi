@@ -2,7 +2,7 @@
  *
  *  - 未选中：右侧显示全部任务的最近运行；
  *  - 选中任务：右侧就地编辑 + 该任务的运行记录；
- *  - 调度器未开启（未设 YOAI_SCHEDULER=1）：只读展示，所有写操作禁用。
+ *  - 调度器被显式关闭（YOAI_SCHEDULER=0）：只读展示，所有写操作禁用。
  *  所有校验以 runtime 为准：前端只组装字段，错误原样显示 schedule.ack 的 message。
  */
 
@@ -376,7 +376,7 @@ export function SchedulerPage({ onOpenSession }: { onOpenSession?: (sessionId: s
 
       {enabled === false && (
         <div className="sched-banner" role="status">
-          定时任务未开启：设置环境变量 <code>YOAI_SCHEDULER=1</code> 后重启 YoAi。现在只能查看，不能修改。
+          定时任务已关闭：移除环境变量 <code>YOAI_SCHEDULER=0</code> 后重启 YoAi。现在只能查看，不能修改。
         </div>
       )}
       {notice && <div className={`boundary-notice ${notice.ok ? "" : "sched-notice-bad"}`}>{notice.text}</div>}

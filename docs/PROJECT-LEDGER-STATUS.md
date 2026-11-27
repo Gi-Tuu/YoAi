@@ -9,7 +9,7 @@
 - **RSI**：R0 反馈信号 → R1 边界看板 → R2.1 shadow 触发 → R2.2 child/parent 隔离验证 → R3.1/3.2/3.3 晋升·试用·回滚 → R4 元策略 → **R5 远端 CT 回执** 全链落地；improved 只进 probation，probation→active 必须人工批准，retired 为终态；**真实数据收益仍在观察期**。
 - **扩展体系**：MCP 支持 stdio/Streamable HTTP/GET SSE 与管理页；Skill 支持脚本包/资源包/强制白名单/requirements+lockfile/本地与远程市场/自动 venv 依赖/RSI candidate/签名链/远端 CT。所有扩展工具走 Core 权限审批。
 - **安全边界**：自动触发默认关；R4 元策略只改阈值权重不改安全边界；远端 CT 公钥只信 catalog；`ct_anchor` 显式调用，不自动提交公网；签名/依赖安装隔离，失败拒绝安装。
-- **定时任务**：S1/S1.1/S2（PR #1 `67542be`）、S3/S4（PR #2 `9ce38bc`）、S5（PR #3 `296bdec`）均已 squash 合并进 `master`；S5 含共享记忆覆盖修复、目标事件、中断提示、每次运行新上下文、定时运行证据。`schedule_create` 真模型弹窗并落盘任务、`schedule_list` 免弹窗正确列出；新上下文真模型对照通过（`FRESH=1` 看不到上一轮，`FRESH=0` 看得到）。默认关闭，`YOAI_SCHEDULER=1` 开启。
+- **定时任务**：S1/S1.1/S2（PR #1 `67542be`）、S3/S4（PR #2 `9ce38bc`）、S5（PR #3 `296bdec`）均已 squash 合并进 `master`；S5 含共享记忆覆盖修复、目标事件、中断提示、每次运行新上下文、定时运行证据。`schedule_create` 真模型弹窗并落盘任务、`schedule_list` 免弹窗正确列出；新上下文真模型对照通过（`FRESH=1` 看不到上一轮，`FRESH=0` 看得到）。默认开启、开箱即食；`YOAI_SCHEDULER=0` 可显式关闭，预置任务默认全关不会自动跑。
 - **GUI 验证**：R5 技能页 20:37 目视确认通过——CT 状态、包 sha256/回执指纹、校验/锚定按钮与本地透明日志展示正常；无代码改动。
 - **下一步**：见 `PROJECT-LEDGER-PLAN.md`；只剩 S4 GUI 目视，RSI 真实数据继续观察。
 
