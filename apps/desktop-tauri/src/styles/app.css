@@ -540,7 +540,8 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 
 /* RSI R1 能力边界看板 */
 .boundary-page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-6); }
-.boundary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); }
+/* 页头按钮避开右上角原生窗口控件（最小化/最大化/关闭） */
+.boundary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); padding-right: var(--window-control-width); }
 .boundary-head h2 { margin: 0; font-size: var(--fs-h2); font-weight: 500; }
 .boundary-head p { margin: 4px 0 0; font-size: var(--fs-note); color: var(--dim); }
 .boundary-summary { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr));
