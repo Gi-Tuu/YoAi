@@ -50,7 +50,7 @@ describe("定时任务页", () => {
   it("未开启时显示横幅，只读展示任务，写操作禁用", async () => {
     render(<SchedulerPage />);
     await feed(state(false, [job()]));
-    expect(screen.getByRole("status").textContent).toContain("YOAI_SCHEDULER=1");
+    expect(screen.getByRole("status").textContent).toContain("YOAI_SCHEDULER=0");
     expect(screen.getByText("早间回顾")).toBeTruthy();
     expect((screen.getByText("＋ 新建") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("开关 早间回顾") as HTMLInputElement).disabled).toBe(true);

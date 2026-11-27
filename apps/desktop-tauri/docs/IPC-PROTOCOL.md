@@ -256,7 +256,7 @@
 
 ### v1 追加（定时任务 S2 / S4）
 
-由 `src/yoai/scheduler/host.py` 处理；未设 `YOAI_SCHEDULER=1` 时 runtime 只读回答。
+由 `src/yoai/scheduler/host.py` 处理；默认开启，设 `YOAI_SCHEDULER=0` 显式关闭时 runtime 只读回答。
 
 | type | 字段 | 行为 |
 |---|---|---|

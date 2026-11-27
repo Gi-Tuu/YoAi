@@ -127,7 +127,7 @@ class Runtime:
         self.meta_evolution: Any = None    # MetaEvolution（R4）
         self.router: Any = None            # ExpertRouter（trial scope 覆盖）
         self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
-        self.scheduler: Any = None         # SchedulerHost（定时任务；YOAI_SCHEDULER=1 开启）
+        self.scheduler: Any = None         # SchedulerHost（定时任务；YOAI_SCHEDULER=0 关闭）
         self.inflight: Any = None          # InflightTurns（S5-2：被打断的对话轮次）
         self._user_cancelled: set[str] = set()   # 用户主动停止的 run（不算"被打断"）
         self._write_lock = asyncio.Lock()
@@ -218,8 +218,9 @@ class Runtime:
         # 否则 current_agent() 会 KeyError，新用户第一句话就失败。
         if not self.sessions.list_sessions():
             self.sessions.create("新会话")
-        # 定时任务（S2，默认关闭；设 YOAI_SCHEDULER=1 开启）。失败只记日志，不影响对话。
-        if os.environ.get("YOAI_SCHEDULER", "0").strip() == "1":
+        # 定时任务：默认开启（开箱即食）；设 YOAI_SCHEDULER=0 可显式关闭。
+        # 预置心跳任务默认关闭，所以默认开启不会自动跑任何任务。失败只记日志，不影响对话。
+        if os.environ.get("YOAI_SCHEDULER", "1").strip() != "0":
             try:
                 from yoai.scheduler.host import SchedulerHost
                 self.scheduler = SchedulerHost(
@@ -1578,7 +1579,7 @@ class Runtime:
             else:
                 await self.send({"v": PROTOCOL_VERSION, "type": "schedule.ack", "command": typ,
                                  "ok": False,
-                                 "message": "定时任务未开启：设置环境变量 YOAI_SCHEDULER=1 后重启 YoAi"})
+                                 "message": "定时任务已通过 YOAI_SCHEDULER=0 关闭：移除该变量后重启 YoAi"})
         elif typ == "shutdown":
             if self.scheduler is not None:
                 try:

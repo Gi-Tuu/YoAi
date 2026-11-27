@@ -1,7 +1,7 @@
 # S4 前端「定时」页方案（2026-11-27）
 
 > YoAi 侧扩展，Core 零改动。状态：**代码已写（2026-11-27 下午）**，前端测试 / typecheck / build 已在本机通过，GUI 目视待做，见文末第 8 节。
-> 前置：S1/S1.1/S2 已在 `feature/scheduler`；默认关闭，`YOAI_SCHEDULER=1` 开启。
+> 前置：S1/S1.1/S2 已在 master；定时任务默认开启，开箱即食；`YOAI_SCHEDULER=0` 可显式关闭。
 
 ## 1. 目标
 
@@ -50,7 +50,7 @@ schedule.runs       {job_id, runs}
 
 1. **顶部状态条**
    - 调度器状态：`开启 / 未开启`；
-   - 未开启时显示：`设置 YOAI_SCHEDULER=1 后重启 YoAi`；
+   - 被显式关闭时显示：`移除 YOAI_SCHEDULER=0 后重启 YoAi`；
    - 专用会话名：`⏰ 定时任务`，给出「打开会话」按钮（切到该 session）。
    - 未开启时只读展示任务，不允许「立即运行 / 取消 / 新建」；编辑保存可允许，
      因为 CLI 也允许在关闭时管理任务。
@@ -114,8 +114,8 @@ schedule.runs       {job_id, runs}
   - `schedule.job_disabled` 显示停用原因；
   - 点击立即运行 / 删除发出正确命令。
 - 类型：`npm run typecheck`、`npm run build` 通过。
-- 真机：`YOAI_SCHEDULER=1` 启动，页面能看到冒烟任务；立即运行一次并在列表看到结果。
-- 不变式：没有 `YOAI_SCHEDULER=1` 时普通对话路径与现在完全一致。
+- 真机：默认启动，页面能看到冒烟任务；立即运行一次并在列表看到结果。
+- 不变式：`YOAI_SCHEDULER=0` 显式关闭时页面只读；默认开启但预置任务全关，不会自动跑任务。
 
 ## 7. 明确不做
 

@@ -1,6 +1,6 @@
 # Event & Scheduler 设计方案（草案 · 待拍板）
 
-> 2026-11-27 起草。状态：**S1–S5 已写完**（默认关闭，`YOAI_SCHEDULER=1` 开启）；S4 见 `SCHEDULER-S4-UI-PLAN.md`，S5 见第 17 节。
+> 2026-11-27 起草。状态：**S1–S5 已写完**（默认开启，开箱即食；`YOAI_SCHEDULER=0` 可显式关闭）；S4 见 `SCHEDULER-S4-UI-PLAN.md`，S5 见第 17 节。
 > 目标：补上 README "尚未实现"第一项——让 YoAi 从"只会回答"变成"会主动做事"。
 
 ---
@@ -271,7 +271,7 @@ export PYTHONPATH="$YOAI_ROOT/src;$YAI_CORE_SRC"
 "$PY" -m pip install croniter
 # 4. 实机：加一个 2 分钟后的任务，开启调度器启动 YoAi
 "$PY" -m yoai.scheduler --data-dir dist/output add --name 测试 --prompt "列出我的目标" --in 2
-YOAI_SCHEDULER=1 ./dist/YoAi.exe
+./dist/YoAi.exe   # 默认开启；排障时可用 YOAI_SCHEDULER=0 关闭
 # 2 分钟后在「⏰ 定时任务」会话里应能看到结果；查看记录：
 "$PY" -m yoai.scheduler --data-dir dist/output runs
 ```
@@ -319,7 +319,7 @@ YoAi 的权限白名单按工具名判断，所以拆成 6 个工具：
 ```bash
 "$PY" -m pytest tests/test_scheduler_tools.py tests/test_scheduler.py tests/test_scheduler_host.py -q
 "$PY" -m pytest -q
-# 实机：YOAI_SCHEDULER=1 启动后，在普通会话里说
+# 实机：默认启动后，在普通会话里说
 #   「20 分钟后提醒我喝水」→ 应弹窗确认 schedule_create → 确认后「⏰ 定时任务」会话里 20 分钟后出现结果
 #   「我有哪些定时任务？」→ 不弹窗，直接列出
 ```
