@@ -290,6 +290,14 @@ export class IpcClient {
     await this.send({ v: PROTOCOL_VERSION, type: "skill.ct_anchor", name });
   }
 
+  // ---- 被打断的对话轮次（S5-2）----
+  async listInterrupted(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "task.interrupted_list" });
+  }
+  async dismissInterrupted(runId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "task.interrupted_dismiss", run_id: runId });
+  }
+
   // ---- 定时任务（S4）----
   async getScheduleState(): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "schedule.list" });

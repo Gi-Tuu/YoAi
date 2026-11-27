@@ -76,10 +76,12 @@
   已用 `41f28a9` 修正测试后 CI pass。
 - S4 前端定时页方案与实机 smoke 清单已落文档（`SCHEDULER-S4-UI-PLAN.md` /
   `SCHEDULER-SMOKE-CHECKLIST.md`）。
-- S3 `schedule_*` 对话工具与 S4 前端页代码完成：Python 全量 393 passed / 3 skipped，
-  前端 36 passed + typecheck/build 通过；真模型验证创建/列举定时任务均成功。待推分支与 GUI 目视。
+- S3 `schedule_*` 对话工具与 S4 前端页：Python 全量 393 passed / 3 skipped，前端 36 passed，
+  typecheck/build 通过；真模型验证创建/列举定时任务均成功。PR #2 已 squash 合并进 `master`（`9ce38bc`）。
+- S5 共享记忆覆盖修复 / 目标事件 / 中断提示 / 新上下文 / 定时运行证据：Python 全量 420 passed / 3 skipped，
+  前端 41 passed，typecheck/build 通过，runtime 五副本一致；待推分支。
 
-## 当前待办（2026-11-27 16:00 口径）
+## 当前待办（2026-11-27 19:00 口径）
 
 上表 #3（进化机制重启）、#6（UI 美化）、#7（README 对外版）、#8（judge 换官方
 gpt-4o）仍有效；其中 #8 是唯一依赖外部 key 的项目。新增/细化的当前项：
@@ -88,5 +90,5 @@ gpt-4o）仍有效；其中 #8 是唯一依赖外部 key 的项目。新增/细�
 |---|---|---|---|---|
 | 9 | RSI 真实数据观察期 | 进行中 | 正常使用积累反馈与边界证据；某标签样本 ≥20 且状态 weak 才生成候选，不硬造 | — |
 | 11 | 公网 CT 服务 / gossip 审计 | 范围外 | 当前只校验外部 CT 回执，不自动提交；若纳入产品默认需另起服务设计与运维 | 是否纳入 |
-| 15 | S5 GoalManager 钩子与完整恢复 | 未做 | 目标创建/状态变化事件、中断恢复；依赖真实使用反馈 | — |
 | 16 | S4 GUI 目视 | 待做 | 打开「定时」页确认布局、开关、新建/编辑、运行记录与未开启横幅 | — |
+| 17 | S5 新上下文真模型验证 | 未做 | 让同一定时任务连续跑两次，确认第二次看不到第一次的对话；`YOAI_SCHEDULER_FRESH=0` 可对照 | — |

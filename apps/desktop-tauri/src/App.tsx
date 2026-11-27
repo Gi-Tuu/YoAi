@@ -22,10 +22,11 @@ import { McpPage } from "./components/McpPage";
 import { SkillPage } from "./components/SkillPage";
 import { MetaPage } from "./components/MetaPage";
 import { SchedulerPage } from "./components/SchedulerPage";
+import { InterruptedBanner } from "./components/InterruptedBanner";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
 import { MessageActions } from "./components/MessageActions";
 import { open as openFile, save as saveFile } from "@tauri-apps/plugin-dialog";
-import type { AttachmentInfo, RuntimeMsg, SnapshotMsg, ThinkingRecord, PermissionLevel } from "./types/ipc";
+import type { AttachmentInfo, InterruptedTurn, RuntimeMsg, SnapshotMsg, ThinkingRecord, PermissionLevel } from "./types/ipc";
 
 const newId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -170,6 +171,7 @@ export default function App() {
   const changingWindow = useRef(false);
   const [page, setPage] = useState<"chat" | "comms" | "galaxy" | "boundary" | "mcp" | "skill" | "meta" | "schedule">("chat");
   const [snap, setSnap] = useState<SnapshotMsg | null>(null);
+  const [interrupted, setInterrupted] = useState<InterruptedTurn[]>([]);   // S5-2 上次被打断的轮次
   const [permission, setPermission] = useState<{
     level: PermissionLevel; description: string;
   }>({ level: "smart", description: "" });
@@ -222,6 +224,7 @@ export default function App() {
       if (m.type === "permission.state") {
         setPermission({ level: m.level, description: m.description });
       }
+      if (m.type === "task.interrupted") setInterrupted(m.items);
     });
     void ipc.connect().catch((e) => setErr(String(e)));
     return () => { off(); void ipc.shutdown().catch(() => {}); };
@@ -261,6 +264,18 @@ export default function App() {
     setInput("");
     setAttachments([]);
   }, [input, ready, beginRun, scrollToBottom]);
+
+  // S5-2：被打断的轮次用同样的输入重新发送（Core 没有断点续跑，不假装从中间继续）
+  const resendInterrupted = useCallback((item: InterruptedTurn) => {
+    if (!ready) return;
+    void ipc.dismissInterrupted(item.run_id).catch((e) => setErr(String(e)));
+    const taskId = newId("t"); const runId = newId("r");
+    beginRun(taskId, runId, item.input);
+    setMsgs([]);
+    stickBottomRef.current = true;
+    requestAnimationFrame(() => scrollToBottom(true));
+    void ipc.startTask(taskId, runId, item.input).catch((e) => setErr(String(e)));
+  }, [ready, beginRun, scrollToBottom]);
 
   // 流式 token 到达时跟随底部（用户在顶部看历史时不打扰）
   const streamTick = [...runs.values()].map((r) =>
@@ -538,6 +553,14 @@ export default function App() {
                 ))}
               </div>
 
+              <InterruptedBanner
+                items={interrupted}
+                currentSessionId={snap?.current_id ?? ""}
+                busy={runList.some((run) => run.state === "running" || run.state === "queued")}
+                onResend={resendInterrupted}
+                onSwitch={(sid) => { void ipc.switchSession(sid).catch((e) => setErr(String(e))); }}
+                onDismiss={(runId) => { void ipc.dismissInterrupted(runId).catch((e) => setErr(String(e))); }}
+              />
               <div className="composer">
                 <div className="composer-toolbar">
                   <button type="button" className="attach-btn" title="添加附件"

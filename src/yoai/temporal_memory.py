@@ -22,12 +22,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from yoai.shared_state import SharedJsonFile, synced
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class TemporalMemory:
+class TemporalMemory(SharedJsonFile):
     """带事件发生时间的个人事件记忆，支持时间范围与主题聚合。"""
 
     def __init__(self, path: str | Path) -> None:
@@ -37,7 +39,10 @@ class TemporalMemory:
         # 写入可观测（阶段A）：只计条数/来源，不记内容、不落盘。
         # 生产侧此前无指标，"模型记0条"会悄悄发生；这里提供基线数据。
         self.write_stats: dict[str, Any] = self._empty_write_stats()
-        self._load()
+        self._init_shared()   # 多会话共享同一文件：读写前自动同步（见 shared_state.py）
+
+    def _reset_state(self) -> None:
+        self._events = []     # 只清文件数据；write_stats 是本实例的计数，不随文件重载
 
     @staticmethod
     def _empty_write_stats() -> dict[str, Any]:
@@ -82,7 +87,9 @@ class TemporalMemory:
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
+        self._mark_saved()
 
+    @synced
     def remember_event(
         self,
         what: str,
@@ -117,16 +124,19 @@ class TemporalMemory:
         self.write_stats[bucket] += 1
         return f"已记住事件：{what}"
 
+    @synced
     def events_between(self, start: str, end: str) -> list[dict[str, Any]]:
         """查 [start, end] 区间内发生的事件（按 event_time 过滤，字典序可比 ISO 8601）。"""
         lo, hi = str(start), str(end)
         out = [e for e in self._events if lo <= e["event_time"] <= hi]
         return sorted(out, key=lambda e: e["event_time"])
 
+    @synced
     def facts_by_tag(self, tag: str) -> list[dict[str, Any]]:
         """按主题聚合某类事实（跨会话汇总用）。"""
         return [e for e in self._events if e["tag"] == tag]
 
+    @synced
     def forget(self, what: str, *, tag: str = "") -> int:
         """删除匹配的事件/事实，返回删除条数（0=没有匹配）。
 
@@ -146,6 +156,7 @@ class TemporalMemory:
         self._save()
         return len(matched)
 
+    @synced
     def recent_events(self, n: int = 10) -> list[dict[str, Any]]:
         """最近 n 条事件（按记录时间倒序），删除前核对精确原文用。"""
         try:
@@ -154,10 +165,12 @@ class TemporalMemory:
             limit = 10
         return list(reversed(self._events[-limit:]))
 
+    @synced
     def timeline(self) -> list[dict[str, Any]]:
         """返回按事件发生时间排序的完整时间线。"""
         return sorted(self._events, key=lambda e: e["event_time"])
 
+    @synced
     def related_events(self, topic: str) -> list[dict[str, Any]]:
         """按细粒度主题取所有相关事件（跨会话聚合的核心）。
 
@@ -174,6 +187,7 @@ class TemporalMemory:
                 out.append(e)
         return sorted(out, key=lambda e: e["event_time"])
 
+    @synced
     def summarize_theme(self, topic: str) -> dict[str, Any]:
         """主题聚合摘要：列出该主题下所有事件 + 数量，供模型做"总共几件"类求和。"""
         events = self.related_events(topic)
@@ -185,6 +199,7 @@ class TemporalMemory:
             ],
         }
 
+    @synced
     def all_topics(self) -> list[str]:
         """列出所有已知主题（帮助模型发现该查什么）。"""
         seen: set[str] = set()
@@ -194,6 +209,7 @@ class TemporalMemory:
                     seen.add(t)
         return sorted(seen)
 
+    @synced
     def remember_from_transcript(
         self,
         turns: list[dict[str, str]],
@@ -297,6 +313,7 @@ class TemporalMemory:
                     added += 1
         return added
 
+    @synced
     def supplement_number_facts(
         self,
         turns: list[dict[str, str]],
@@ -340,6 +357,7 @@ class TemporalMemory:
                 added += 1
         return added
 
+    @synced
     def supplement_assistant_entities(
         self,
         turns: list[dict[str, str]],
@@ -386,5 +404,6 @@ class TemporalMemory:
                 added += 1
         return added
 
+    @synced
     def count(self) -> int:
         return len(self._events)
