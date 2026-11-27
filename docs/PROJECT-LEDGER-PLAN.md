@@ -79,9 +79,9 @@
 - S3 `schedule_*` 对话工具与 S4 前端页：Python 全量 393 passed / 3 skipped，前端 36 passed，
   typecheck/build 通过；真模型验证创建/列举定时任务均成功。PR #2 已 squash 合并进 `master`（`9ce38bc`）。
 - S5 共享记忆覆盖修复 / 目标事件 / 中断提示 / 新上下文 / 定时运行证据：Python 全量 420 passed / 3 skipped，
-  前端 41 passed，typecheck/build 通过，runtime 五副本一致；待推分支。
+  前端 41 passed，typecheck/build 通过，runtime 五副本一致；PR #3 已 squash 合并进 `master`（`296bdec`）。
 
-## 当前待办（2026-11-27 19:00 口径）
+## 当前待办（2026-11-27 19:05 口径）
 
 上表 #3（进化机制重启）、#6（UI 美化）、#7（README 对外版）、#8（judge 换官方
 gpt-4o）仍有效；其中 #8 是唯一依赖外部 key 的项目。新增/细化的当前项：

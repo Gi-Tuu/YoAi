@@ -384,6 +384,8 @@ OpenClaw 重启后能接着跑被打断的轮次 [restart-recovery]；**Core 没
 沙箱通过：`test_shared_state` 8、`test_inflight` 6、`test_scheduler_s5` 10、`test_scheduler_host` 13、`test_scheduler_tools` 10（+2 需 Core 跳过）、
 原 `test_state` 7、`test_temporal_memory` 17；另用真实 `yoai_runtime.py` + 替身跑通"关应用 → 下次提示 → 忽略 / 用户停止不算 / 正常完成不留"。
 
+S5 已由 PR #3 squash 合并进 `master`（提交 `296bdec`）。
+
 **本机验证（2026-11-27 18:52）**：Python 全量 **420 passed, 3 skipped**（含 S5 全部用例）；
 前端 **41 passed**（新增 `interrupted-banner` 5 项）；`npm run typecheck` / `npm run build` 通过；
 runtime 五副本 hash 一致。**仍未验证**：真实模型下的第 3 项（运行窗口依赖 Core 每轮从
