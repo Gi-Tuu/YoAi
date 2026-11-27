@@ -11,6 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+scheduler = ["croniter>=6"]   # 仅 cron 表达式需要；其余调度功能零依赖
 
 [project.scripts]
 yoai = "yoai.cli:main"

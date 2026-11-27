@@ -127,6 +127,7 @@ class Runtime:
         self.meta_evolution: Any = None    # MetaEvolution（R4）
         self.router: Any = None            # ExpertRouter（trial scope 覆盖）
         self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
+        self.scheduler: Any = None         # SchedulerHost（定时任务；YOAI_SCHEDULER=1 开启）
         self._write_lock = asyncio.Lock()
 
     # ---- 输出 ----
@@ -177,6 +178,9 @@ class Runtime:
         agent_kwargs_base["skill_store"] = self.skill_store
         def kwargs_for_session(session: Any) -> dict[str, Any] | None:
             """项目模式：给该会话的 agent 挂项目读写工具；聊天模式返回 None 用默认。"""
+            # 定时任务专用会话：独立 channel + 无人值守白名单（不弹窗、fail closed）
+            if self.scheduler is not None and self.scheduler.is_session(getattr(session, "id", "")):
+                return self.scheduler.agent_overrides()
             if getattr(session, "mode", "chat") != "project":
                 return None
             proj = self.projects.get(getattr(session, "project_id", ""))
@@ -209,6 +213,22 @@ class Runtime:
         if not self.sessions.list_sessions():
             self.sessions.create("新会话")
         self.agent = self.sessions.current_agent()
+
+        # 定时任务（S2，默认关闭；设 YOAI_SCHEDULER=1 开启）。失败只记日志，不影响对话。
+        if os.environ.get("YOAI_SCHEDULER", "0").strip() == "1":
+            try:
+                from yoai.scheduler.host import SchedulerHost
+                self.scheduler = SchedulerHost(
+                    data_dir, self.sessions, self.send,
+                    is_busy=lambda: any(not t.done() for t in self.tasks.values()),
+                    channel_factory=make_sidecar_channel,
+                    fallback_request=self._request_host,
+                    on_history_changed=self._push_snapshot,
+                    log=_log,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log(f"scheduler init failed: {exc}")
+                self.scheduler = None
 
         # thinking 持久化（YoAi 侧，内核零改动）：历史消息也能看思考过程
         try:
@@ -406,6 +426,8 @@ class Runtime:
         from yoai.user_config import UserConfig
 
         target = agent if agent is not None else self.agent
+        if self.scheduler is not None and self.scheduler.owns(target):
+            return "smart"   # 定时任务会话的权限由调度器在每次运行前锁定，不跟随档位
         policy = getattr(getattr(target, "core", None), "policy", None)
         if policy is None:
             return ""
@@ -444,6 +466,11 @@ class Runtime:
             "smart": "智能访问：只读/记忆类自动放行，写操作弹窗确认",
             "manual": "手批访问：每个工具调用都弹窗确认",
         }
+        if self.scheduler is not None and self.scheduler.is_session(self._session_id()):
+            await self.send(permission_state(
+                level="smart",
+                description="定时任务会话：固定为无人值守白名单（只读 + 记忆类），其他工具需要你手动确认"))
+            return
         await self.send(permission_state(
             level=level, description=descriptions.get(level, "")))
 
@@ -650,6 +677,13 @@ class Runtime:
             await self.send(status(task_id, run_id, -1, "failed", str(exc)))
             return
 
+        if (self.scheduler is not None and self.scheduler.is_session(self._session_id())
+                and self.scheduler.busy()):
+            msg = "定时任务正在这个会话里运行，请稍后再发，或换到其他会话"
+            await self.send(error("runtime", msg, task_id=task_id, run_id=run_id))
+            await self.send(status(task_id, run_id, -1, "failed", msg))
+            return
+
         self._active_task_id, self._active_run_id = task_id, run_id
         self.seq.reset_run(task_id, run_id)
         self.stream_text[run_id] = ""
@@ -854,6 +888,11 @@ class Runtime:
             await self._push_snapshot()
             await self._push_chat_state()
             await self._push_permission_state()
+            if self.scheduler is not None and not self.scheduler.started:
+                try:
+                    await self.scheduler.start()
+                except Exception as exc:  # noqa: BLE001
+                    _log(f"scheduler start failed: {exc}")
         elif typ == "task.start":
             await self.start_task(task_id, run_id, str(cmd.get("input", "")))
         elif typ == "task.cancel":
@@ -942,6 +981,10 @@ class Runtime:
             await self._push_permission_state()
         elif typ == "permission.set":
             self._ensure_agent()
+            if self.scheduler is not None and self.scheduler.is_session(self._session_id()):
+                await self.send(error("protocol", "定时任务会话的权限固定为无人值守白名单，不能修改"))
+                await self._push_permission_state()
+                return True
             level = str(cmd.get("level", "")).strip().lower()
             from yoai.bootstrap import PERMISSION_LEVELS, apply_permission_level
             from yoai.user_config import UserConfig
@@ -1472,7 +1515,19 @@ class Runtime:
                 self.feedback_store.add(signal)
             await self.send(feedback_recorded(signal=signal.to_dict()))
             await self._push_boundary_state()
+        elif typ.startswith("schedule."):
+            self._ensure_agent()
+            if self.scheduler is None:
+                await self.send(error("protocol",
+                                      "定时任务未开启：设置环境变量 YOAI_SCHEDULER=1 后重启 YoAi"))
+            else:
+                await self.scheduler.handle(typ, cmd)
         elif typ == "shutdown":
+            if self.scheduler is not None:
+                try:
+                    await self.scheduler.shutdown()
+                except Exception as exc:  # noqa: BLE001
+                    _log(f"scheduler shutdown failed: {exc}")
             for task in list(self.tasks.values()):
                 task.cancel()
             for fut in self.pending_approvals.values():
@@ -1561,6 +1616,11 @@ async def amain() -> None:
             task.cancel()
         if rt.tasks:
             await asyncio.gather(*rt.tasks.values(), return_exceptions=True)
+        if rt.scheduler is not None:
+            try:
+                await rt.scheduler.shutdown()
+            except Exception as exc:  # noqa: BLE001
+                _log(f"scheduler shutdown failed: {exc}")
 
 
 def main() -> int:
