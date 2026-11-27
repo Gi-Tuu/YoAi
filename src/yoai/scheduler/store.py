@@ -14,6 +14,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,8 @@ class SchedulerStore:
         self.keep_lines = keep_lines
         self._jobs: dict[str, Job] = {}
         self._mtime: int | None = None
+        # 对话工具可能在工作线程里改任务，与事件循环里的 tick 并发——任务表统一加锁
+        self._lock = threading.RLock()
         self._load()
 
     # ---- jobs ----
@@ -66,6 +69,10 @@ class SchedulerStore:
             return None
 
     def _load(self) -> None:
+        with self._lock:
+            self._load_locked()
+
+    def _load_locked(self) -> None:
         self._mtime = self._stat_mtime()
         if self._mtime is None:
             self._jobs = {}
@@ -91,11 +98,12 @@ class SchedulerStore:
 
     def refresh(self) -> bool:
         """jobs.json 被外部改过就重新加载；返回是否重载。"""
-        current = self._stat_mtime()
-        if current is not None and current != self._mtime:
-            self._load()
-            return True
-        return False
+        with self._lock:
+            current = self._stat_mtime()
+            if current is not None and current != self._mtime:
+                self._load_locked()
+                return True
+            return False
 
     def _save(self) -> None:
         payload = {jid: job.to_dict() for jid, job in self._jobs.items()}
@@ -104,23 +112,27 @@ class SchedulerStore:
         self._mtime = self._stat_mtime()
 
     def list_jobs(self) -> list[Job]:
-        return sorted(self._jobs.values(), key=lambda j: j.created_at)
+        with self._lock:
+            return sorted(self._jobs.values(), key=lambda j: j.created_at)
 
     def get(self, job_id: str) -> Job | None:
-        return self._jobs.get(job_id)
+        with self._lock:
+            return self._jobs.get(job_id)
 
     def save(self, job: Job) -> Job:
         """新增或覆盖（调用方负责先 validate）。"""
-        job.touch()
-        self._jobs[job.id] = job
-        self._save()
-        return job
+        with self._lock:
+            job.touch()
+            self._jobs[job.id] = job
+            self._save()
+            return job
 
     def delete(self, job_id: str) -> bool:
-        if self._jobs.pop(job_id, None) is None:
-            return False
-        self._save()          # 运行日志保留，便于审计与 RSI 取样
-        return True
+        with self._lock:
+            if self._jobs.pop(job_id, None) is None:
+                return False
+            self._save()          # 运行日志保留，便于审计与 RSI 取样
+            return True
 
     # ---- runs ----
     def run_file(self, job_id: str) -> Path:

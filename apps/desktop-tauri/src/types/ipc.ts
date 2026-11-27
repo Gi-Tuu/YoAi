@@ -380,6 +380,99 @@ export interface McpAckMsg extends BaseMsg {
   message: string;
 }
 
+// ---- 定时任务（S2 协议，S4 界面）----
+export type ScheduleTriggerKind = "once" | "interval" | "daily" | "weekly" | "cron" | "event";
+export type ScheduleRunState = "running" | "ok" | "failed" | "timeout" | "interrupted" | "skipped";
+
+export interface ScheduleTrigger {
+  kind: ScheduleTriggerKind;
+  at?: string;           // once：ISO（带时区）
+  every_s?: number;      // interval：秒（≥300）
+  time?: string;         // daily / weekly："HH:MM"
+  weekdays?: number[];   // weekly：0=周一 … 6=周日
+  expr?: string;         // cron
+  event?: string;        // event：app_started / goal_created / goal_status_changed / goal_stale
+  params?: Record<string, unknown>;
+  tz?: string;
+}
+
+export interface ScheduleJob {
+  id: string;
+  name: string;
+  trigger: ScheduleTrigger;
+  prompt: string;
+  enabled: boolean;
+  allowed_tools: string[];
+  misfire: "run_once" | "skip";
+  on_interrupt: "notify" | "retry_once";
+  timeout_s: number;
+  active_hours: string;
+  idle_only: boolean;
+  scratch: string | null;
+  skip_if_scratch_empty: boolean;
+  next_fire_at: string;
+  last_run_id: string;
+  last_state: ScheduleRunState | "";
+  consecutive_failures: number;
+  disabled_reason: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  schedule_text: string;
+  running: boolean;
+  waiting: boolean;
+}
+
+/** 新建 / 编辑时发给 runtime 的字段（runtime 只合并可编辑字段）。 */
+export type ScheduleJobDraft = Partial<Pick<ScheduleJob,
+  "id" | "name" | "trigger" | "prompt" | "enabled" | "allowed_tools" | "misfire" | "on_interrupt"
+  | "timeout_s" | "active_hours" | "idle_only" | "scratch" | "skip_if_scratch_empty">>;
+
+export interface ScheduleRun {
+  run_id: string;
+  job_id: string;
+  job_name: string;
+  reason: string;
+  state: ScheduleRunState;
+  started_at: string;
+  finished_at: string;
+  summary: string;
+  quiet: boolean;
+  denied_tools: string[];
+  evidence_id: string;
+}
+
+export interface ScheduleStateMsg extends BaseMsg {
+  type: "schedule.state";
+  enabled: boolean;
+  jobs: ScheduleJob[];
+  session_id: string;
+  session_name: string;
+}
+
+export interface ScheduleAckMsg extends BaseMsg {
+  type: "schedule.ack";
+  command: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface ScheduleRunEventMsg extends BaseMsg {
+  type: "schedule.run_started" | "schedule.run_finished" | "schedule.run_interrupted";
+  run: ScheduleRun;
+}
+
+export interface ScheduleJobDisabledMsg extends BaseMsg {
+  type: "schedule.job_disabled";
+  job: ScheduleJob;
+}
+
+export interface ScheduleRunsMsg extends BaseMsg {
+  type: "schedule.runs";
+  job_id: string;
+  runs: ScheduleRun[];
+}
+
 export interface RsiRolledBackMsg extends BaseMsg {
   type: "rsi.rolled_back";
   decision: {
@@ -483,7 +576,8 @@ export type RuntimeMsg =
   | TrialStateMsg | TrialReportMsg | ApprovalRecordedMsg | RsiRolledBackMsg
   | McpStateMsg | McpConfigMsg | McpAckMsg | SkillStateMsg | SkillConfigMsg
   | SkillAckMsg | SkillCtResultMsg | SkillMarketStateMsg
-  | RsiMetaStateMsg | RsiMetaAckMsg;
+  | RsiMetaStateMsg | RsiMetaAckMsg
+  | ScheduleStateMsg | ScheduleAckMsg | ScheduleRunEventMsg | ScheduleJobDisabledMsg | ScheduleRunsMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -550,6 +644,13 @@ export type Command =
   | { v: 1; type: "skill.market_remove"; name: string }
   | { v: 1; type: "skill.ct_verify"; name: string }
   | { v: 1; type: "skill.ct_anchor"; name: string }
+  | { v: 1; type: "schedule.list" }
+  | { v: 1; type: "schedule.save"; job: ScheduleJobDraft }
+  | { v: 1; type: "schedule.delete"; job_id: string }
+  | { v: 1; type: "schedule.toggle"; job_id: string; enabled: boolean }
+  | { v: 1; type: "schedule.run_now"; job_id: string }
+  | { v: 1; type: "schedule.cancel"; job_id: string }
+  | { v: 1; type: "schedule.runs"; job_id?: string; limit?: number }
   | { v: 1; type: "config.get" }
   | { v: 1; type: "config.set"; patch: Record<string, unknown> }
   | { v: 1; type: "approval.reply"; task_id: string; run_id: string; allow: boolean }

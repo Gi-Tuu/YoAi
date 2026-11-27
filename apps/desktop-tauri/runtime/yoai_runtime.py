@@ -176,6 +176,9 @@ class Runtime:
         agent_kwargs_base = agent_kwargs(data_dir, channel=channel_cb)
         agent_kwargs_base["mcp_manager"] = self.mcp_manager
         agent_kwargs_base["skill_store"] = self.skill_store
+        # S3：对话里管理定时任务。callable 在 agent 构造时求值；调度器未开启 → 不注册任何工具
+        agent_kwargs_base["extra_tool_specs"] = (
+            lambda: self.scheduler.tool_specs() if self.scheduler is not None else [])
         def kwargs_for_session(session: Any) -> dict[str, Any] | None:
             """项目模式：给该会话的 agent 挂项目读写工具；聊天模式返回 None 用默认。"""
             # 定时任务专用会话：独立 channel + 无人值守白名单（不弹窗、fail closed）
@@ -212,8 +215,6 @@ class Runtime:
         # 否则 current_agent() 会 KeyError，新用户第一句话就失败。
         if not self.sessions.list_sessions():
             self.sessions.create("新会话")
-        self.agent = self.sessions.current_agent()
-
         # 定时任务（S2，默认关闭；设 YOAI_SCHEDULER=1 开启）。失败只记日志，不影响对话。
         if os.environ.get("YOAI_SCHEDULER", "0").strip() == "1":
             try:
@@ -229,6 +230,7 @@ class Runtime:
             except Exception as exc:  # noqa: BLE001
                 _log(f"scheduler init failed: {exc}")
                 self.scheduler = None
+        self.agent = self.sessions.current_agent()
 
         # thinking 持久化（YoAi 侧，内核零改动）：历史消息也能看思考过程
         try:
@@ -1517,11 +1519,16 @@ class Runtime:
             await self._push_boundary_state()
         elif typ.startswith("schedule."):
             self._ensure_agent()
-            if self.scheduler is None:
-                await self.send(error("protocol",
-                                      "定时任务未开启：设置环境变量 YOAI_SCHEDULER=1 后重启 YoAi"))
-            else:
+            if self.scheduler is not None:
                 await self.scheduler.handle(typ, cmd)
+            elif typ in ("schedule.list", "schedule.state", "schedule.runs"):
+                # 未开启：只读展示已有任务（例如命令行建的），界面显示「未开启」
+                from yoai.scheduler.host import disabled_message
+                await self.send(disabled_message(_data_dir(), typ, cmd))
+            else:
+                await self.send({"v": PROTOCOL_VERSION, "type": "schedule.ack", "command": typ,
+                                 "ok": False,
+                                 "message": "定时任务未开启：设置环境变量 YOAI_SCHEDULER=1 后重启 YoAi"})
         elif typ == "shutdown":
             if self.scheduler is not None:
                 try:

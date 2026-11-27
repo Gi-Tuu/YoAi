@@ -244,7 +244,8 @@ class SchedulerEngine:
             if job is None or not job.enabled:
                 self._pending.pop(job_id, None)
                 continue
-            status, run_id = await self._fire(job, reason, variables)
+            status, run_id = await self._fire(
+                job, reason, variables, advance=reason not in _UNRESTRICTED_REASONS)
             if status != WAITING:
                 self._pending.pop(job_id, None)
             if run_id:
@@ -273,6 +274,12 @@ class SchedulerEngine:
         if status == WAITING:
             self._pending[job_id] = ("manual", {})
         return run_id
+
+    def request_run(self, job_id: str) -> None:
+        """同步入队一次手动运行（供对话工具调用；下一次 tick 执行，不推迟原定时间）。"""
+        if self.store.get(job_id) is None:
+            raise SchedulerError(f"找不到任务 {job_id}")
+        self._pending[job_id] = ("manual", {})
 
     async def emit(self, event_name: str, **payload: Any) -> list[str]:
         """外部事件入口：app_started / goal_created / goal_status_changed。"""
@@ -398,14 +405,16 @@ class SchedulerEngine:
         if advance:
             self._advance(job, now)
         self.store.save(job)
-        await self._emit_notify("run_started", record.to_dict())
 
         prompt = render_prompt(job.prompt, variables)
         if job.scratch and job.scratch.strip():
             prompt = f"{prompt}\n\n【检查清单】\n{job.scratch.strip()}"
+        # 先登记再 await：从 is_running 检查到这里没有任何 await，
+        # 两个并发触发（tick / 命令 / 对话工具）不会把同一任务跑两次。
         task = asyncio.create_task(self._execute(job.id, record, prompt),
                                    name=f"yoai-schedule-{job.id}")
         self._running[job.id] = task
+        await self._emit_notify("run_started", record.to_dict())
         return STARTED, record.run_id
 
     async def _record_skip(self, job: Job, reason: str, why: str, *, quiet: bool = False) -> None:

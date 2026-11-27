@@ -19,6 +19,7 @@ runtime 只需：
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import inspect
 import json
@@ -37,6 +38,7 @@ from yoai.scheduler.models import (
 from yoai.scheduler.policy import UnattendedGate, allowed_set
 from yoai.scheduler.presets import HEARTBEAT_ID, heartbeat_job
 from yoai.scheduler.store import SchedulerStore
+from yoai.scheduler.triggers import describe
 
 PROTOCOL_VERSION = 1
 CLARIFY_UNATTENDED = (
@@ -49,6 +51,29 @@ EDITABLE_FIELDS = (
 )
 
 RequestHost = Callable[[str, dict[str, Any]], Awaitable[Any]]
+
+
+def _job_state(job: Job, *, running: bool = False, waiting: bool = False) -> dict[str, Any]:
+    return {**job.to_dict(), "schedule_text": describe(job.trigger),
+            "running": running, "waiting": waiting}
+
+
+def disabled_message(data_dir: str | Path, typ: str, cmd: dict[str, Any]) -> dict[str, Any]:
+    """调度器未开启时，只读回答 schedule.list / state / runs（S4 界面据此显示「未开启」）。
+
+    目录不存在就返回空，不会为了"看一眼"去创建 output/scheduler/。
+    """
+    root = Path(data_dir) / "scheduler"
+    store = SchedulerStore(root) if root.is_dir() else None
+    if typ == "schedule.runs":
+        job_id = str(cmd.get("job_id", "") or "")
+        limit = int(cmd.get("limit", 20) or 20)
+        runs = store.runs(job_id, limit=limit) if store is not None else []
+        return {"v": PROTOCOL_VERSION, "type": "schedule.runs", "job_id": job_id,
+                "runs": [r.to_dict() for r in runs]}
+    jobs = [_job_state(j) for j in store.list_jobs()] if store is not None else []
+    return {"v": PROTOCOL_VERSION, "type": "schedule.state", "enabled": False, "jobs": jobs,
+            "session_id": "", "session_name": SCHEDULER_SESSION_NAME}
 
 
 def _default_policy(allowed: set[str]) -> Any:
@@ -98,6 +123,7 @@ class SchedulerHost:
         self._on_history = on_history_changed
         self._log = log or logging.getLogger("yoai.scheduler").info
         self._gate: UnattendedGate | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self.channel = channel_factory(self._request_host)
         self.engine = SchedulerEngine(
             self.store, self._run_job, clock=clock, is_busy=is_busy,
@@ -156,6 +182,24 @@ class SchedulerHost:
 
     def busy(self) -> bool:
         return self.engine.any_running()
+
+    def tool_specs(self) -> list[Any]:
+        """S3：给每个会话的 agent 注册 schedule_* 工具。"""
+        from yoai.scheduler.tools import schedule_tool_specs
+        return schedule_tool_specs(self)
+
+    def notify_changed(self) -> None:
+        """对话工具改了任务后推一次 schedule.state（可在任意线程调用）。"""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+
+        def _schedule() -> None:
+            asyncio.ensure_future(self.push_state())
+        try:
+            loop.call_soon_threadsafe(_schedule)
+        except RuntimeError:
+            pass
 
     def _goals(self) -> list[dict[str, Any]]:
         agent = self.sessions.agent_for(self.session_id)
@@ -273,6 +317,7 @@ class SchedulerHost:
     async def push_state(self) -> None:
         await self._emit({
             "type": "schedule.state",
+            "enabled": True,
             "jobs": self.engine.state(),
             "session_id": self.session_id,
             "session_name": SCHEDULER_SESSION_NAME,
@@ -286,6 +331,7 @@ class SchedulerHost:
         if self.started:
             return
         self.started = True
+        self._loop = asyncio.get_running_loop()
         interrupted = await self.engine.startup()
         self.engine.start()
         if interrupted:
@@ -302,7 +348,14 @@ class SchedulerHost:
         job_id = str(raw.get("id", "") or "")
         existing = self.store.get(job_id) if job_id else None
         if existing is None:
-            return Job.from_dict(raw)
+            if job_id:
+                raise SchedulerError(f"找不到任务 {job_id}（可能已被删除）")
+            # 新建只接受可编辑字段：不能借新建写入运行统计 / 来源 / id
+            fresh = {k: raw[k] for k in EDITABLE_FIELDS if k in raw}
+            fresh.setdefault("name", "")
+            fresh.setdefault("prompt", "")
+            fresh.setdefault("trigger", {})
+            return Job.from_dict(fresh)
         merged = existing.to_dict()
         for key in EDITABLE_FIELDS:
             if key in raw:

@@ -19,7 +19,7 @@ READ_ONLY_TOOLS = frozenset({
     "proj_list", "proj_read",
     "web_search", "web_fetch",
     "now", "recent_events", "list_tools",
-    "schedule_list",
+    "schedule_list", "schedule_runs",
 })
 
 # 记忆 / 目标内部写（只改 YoAi 自己的状态，不碰用户文件和系统）
@@ -45,6 +45,8 @@ def is_never_allowed(tool: str) -> bool:
     """黑名单 + 所有外部扩展工具（MCP/Skill 以前缀区分）默认不放行。"""
     if tool in NEVER_UNATTENDED:
         return True
+    if tool.startswith("schedule_") and tool not in READ_ONLY_TOOLS:
+        return True                # 定时任务不能自我繁殖 / 自我改写
     return tool.startswith(("mcp__", "mcp.", "skill__", "skill."))
 
 

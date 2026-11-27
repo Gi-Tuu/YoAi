@@ -80,6 +80,7 @@ class YoAiAgent:
         mcp_manager: Any = None,
         skill_store: Any = None,
         model_timeout: float | None = "env",  # type: ignore[assignment]
+        extra_tool_specs: Any = None,   # 宿主额外工具：ToolSpec 列表，或返回列表的 callable
     ) -> None:
         """tool_filter: 可选 callable(task)->set[str]|None，在每次 astream 开始时按任务
         过滤可用工具（专家白名单接线）。None 或返回 None 表示不限制。默认不启用，
@@ -185,6 +186,7 @@ class YoAiAgent:
             from yoai.skills import SkillStore
             skill_store = SkillStore(data_dir)
         self.skill_store = skill_store
+        self._extra_tool_specs = extra_tool_specs
         self._all_tool_specs = self._build_all_specs(
             builtin_tools, workspace_root, readonly_roots, project_root, project_name)
         self.core.register_tools(self._all_tool_specs)
@@ -277,6 +279,15 @@ class YoAiAgent:
             except Exception as exc:  # noqa: BLE001
                 import sys as _sys
                 print(f"[yoai] skill discovery failed: {exc}", file=_sys.stderr, flush=True)
+        # 宿主额外工具（如定时任务 schedule_*）：callable 在构造时求值；坏了不影响其它工具。
+        extra = getattr(self, "_extra_tool_specs", None)
+        if extra is not None:
+            try:
+                items = extra() if callable(extra) else extra
+                specs = specs + list(items or [])
+            except Exception as exc:  # noqa: BLE001
+                import sys as _sys
+                print(f"[yoai] extra tools failed: {exc}", file=_sys.stderr, flush=True)
         # list_tools：模型自省能力边界（列全部工具名+描述），不再靠猜；
         # request_capability 由 Core 的 discovery 机制注册为 meta_tool 并拦截处理。
         specs.append(self._build_list_tools_spec())

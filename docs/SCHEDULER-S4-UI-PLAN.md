@@ -1,6 +1,6 @@
 # S4 前端「定时」页方案（2026-11-27）
 
-> YoAi 侧扩展，Core 零改动。状态：**设计方案，未写代码**。
+> YoAi 侧扩展，Core 零改动。状态：**代码已写（2026-11-27 下午）**，前端测试 / typecheck / build 已在本机通过，GUI 目视待做，见文末第 8 节。
 > 前置：S1/S1.1/S2 已在 `feature/scheduler`；默认关闭，`YOAI_SCHEDULER=1` 开启。
 
 ## 1. 目标
@@ -124,3 +124,24 @@ schedule.runs       {job_id, runs}
 - 不做 cron 表达式本地解析（完全交后端 croniter）；
 - 不做任务 DAG 依赖编排；
 - 不做应用关闭后常驻运行。
+
+## 8. 实现记录（2026-11-27）
+
+**对齐 OpenClaw**：其 Control UI 的 Automations 页改为主从布局——左侧任务列表（全部 / 开启 / 暂停 + 搜索），
+右侧就地编辑选中任务并显示该任务的运行记录；未选中时显示全部任务的最近运行。S4 按同样结构实现。
+
+| 文件 | 内容 |
+|---|---|
+| `src/components/SchedulerPage.tsx`（新） | 主从布局；表单覆盖 6 种触发方式 + 高级设置；删除二次确认；未开启只读 |
+| `src/types/ipc.ts` | `ScheduleJob / ScheduleRun / ScheduleTrigger / ScheduleJobDraft` + 5 种消息 + 7 个命令 |
+| `src/lib/ipc.ts` | `getScheduleState / saveScheduleJob / deleteScheduleJob / toggleScheduleJob / runScheduleNow / cancelScheduleRun / getScheduleRuns` |
+| `src/App.tsx` | 左侧导航「定时」；「打开结果会话」切到专用会话 |
+| `src/styles/app.css` | `.sched-*`，零圆角 / 1px 描边 / 无阴影，沿用纸墨令牌 |
+| `tests/scheduler-page.test.tsx`（新） | 8 项：未开启横幅、筛选与命令、运行记录过滤与安静结果、新建组装 trigger、失败 ack、二次确认删除、停用提示、时间互转 |
+| 后端 | `schedule.state` 加 `enabled`；未开启时 `disabled_message()` 只读回答；新建只接受可编辑字段、带未知 id 报错 |
+
+与第 2 节的差异：未开启时**编辑也禁用**（runtime 未开启时无法保存，与其让用户填完再报错，不如直接只读）。
+
+**验证口径（2026-11-27 本机）**：Python 侧 `test_scheduler_host.py` 13 项通过；
+`npm run typecheck && npm test && npm run build` 全绿，前端 **36 passed**（新增 8 项 scheduler-page 测试）。
+协议 smoke 另验证调度器 ON/OFF 分别返回 `enabled=true/false`。GUI 目视仍待做。

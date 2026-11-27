@@ -400,6 +400,28 @@ def test_interrupted_run_is_marked_on_next_startup(tmp_path):
     asyncio.run(main())
 
 
+def test_concurrent_triggers_do_not_double_run(tmp_path):
+    """回归：通知回调会让出事件循环；旧实现在登记运行之前就 await 通知，
+    两个同时到达的触发（tick / 界面命令 / 对话工具）会把同一任务跑两次。"""
+    async def main():
+        clock = Clock(t(2026, 11, 27, 10))
+        runner = FakeRunner()
+        runner.gate = asyncio.Event()
+
+        async def notify(kind, payload):
+            await asyncio.sleep(0)
+
+        store, eng = make(tmp_path, clock, runner, notify=notify)
+        job = eng.add_job(Job(name="x", trigger=daily(), prompt="p"))
+        await asyncio.gather(eng.run_now(job.id), eng.run_now(job.id))
+        await asyncio.sleep(0)
+        runner.gate.set()
+        await eng.wait_idle()
+        assert len(runner.calls) == 1
+        assert sorted(r.state for r in store.runs(job.id, limit=0)) == ["ok", "skipped"]
+    asyncio.run(main())
+
+
 def test_manual_cancel_is_recorded(tmp_path):
     async def main():
         clock = Clock(t(2026, 11, 27, 10))

@@ -21,6 +21,7 @@ import { BoundaryPage } from "./components/BoundaryPage";
 import { McpPage } from "./components/McpPage";
 import { SkillPage } from "./components/SkillPage";
 import { MetaPage } from "./components/MetaPage";
+import { SchedulerPage } from "./components/SchedulerPage";
 import { ModalConfirm, ModalInput } from "./components/Dialog";
 import { MessageActions } from "./components/MessageActions";
 import { open as openFile, save as saveFile } from "@tauri-apps/plugin-dialog";
@@ -167,7 +168,7 @@ export default function App() {
   const [floating, setFloating] = useState(false);
   const savedWindow = useRef<Awaited<ReturnType<typeof shrinkWindow>> | null>(null);
   const changingWindow = useRef(false);
-  const [page, setPage] = useState<"chat" | "comms" | "galaxy" | "boundary" | "mcp" | "skill" | "meta">("chat");
+  const [page, setPage] = useState<"chat" | "comms" | "galaxy" | "boundary" | "mcp" | "skill" | "meta" | "schedule">("chat");
   const [snap, setSnap] = useState<SnapshotMsg | null>(null);
   const [permission, setPermission] = useState<{
     level: PermissionLevel; description: string;
@@ -476,6 +477,8 @@ export default function App() {
                 onClick={() => setPage("comms")}>通讯</button>
         <button className={`nav-item ${page === "galaxy" ? "active" : ""}`} title="星球系" aria-current={page === "galaxy" ? "page" : undefined}
                 onClick={() => setPage("galaxy")}>星球</button>
+        <button className={`nav-item ${page === "schedule" ? "active" : ""}`} title="定时任务" aria-current={page === "schedule" ? "page" : undefined}
+                onClick={() => setPage("schedule")}>定时</button>
         <button className={`nav-item ${page === "boundary" ? "active" : ""}`} title="能力边界看板" aria-current={page === "boundary" ? "page" : undefined}
                 onClick={() => setPage("boundary")}>边界</button>
         <button className={`nav-item ${page === "mcp" ? "active" : ""}`} title="MCP 扩展" aria-current={page === "mcp" ? "page" : undefined}
@@ -603,6 +606,9 @@ export default function App() {
         {page === "mcp" && <McpPage />}
         {page === "skill" && <SkillPage />}
         {page === "meta" && <MetaPage />}
+        {page === "schedule" && (
+          <SchedulerPage onOpenSession={(sid) => { void ipc.switchSession(sid); setPage("chat"); }} />
+        )}
       </div>
 
       {dialog?.kind === "rename" && (
