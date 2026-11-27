@@ -473,6 +473,23 @@ export interface ScheduleRunsMsg extends BaseMsg {
   runs: ScheduleRun[];
 }
 
+// ---- 被打断的对话轮次（S5-2）----
+export interface InterruptedTurn {
+  run_id: string;
+  task_id: string;
+  session_id: string;
+  session_name: string;
+  input: string;
+  truncated: boolean;
+  started_at: string;
+  interrupted_at?: string;
+}
+
+export interface TaskInterruptedMsg extends BaseMsg {
+  type: "task.interrupted";
+  items: InterruptedTurn[];
+}
+
 export interface RsiRolledBackMsg extends BaseMsg {
   type: "rsi.rolled_back";
   decision: {
@@ -577,7 +594,8 @@ export type RuntimeMsg =
   | McpStateMsg | McpConfigMsg | McpAckMsg | SkillStateMsg | SkillConfigMsg
   | SkillAckMsg | SkillCtResultMsg | SkillMarketStateMsg
   | RsiMetaStateMsg | RsiMetaAckMsg
-  | ScheduleStateMsg | ScheduleAckMsg | ScheduleRunEventMsg | ScheduleJobDisabledMsg | ScheduleRunsMsg;
+  | ScheduleStateMsg | ScheduleAckMsg | ScheduleRunEventMsg | ScheduleJobDisabledMsg | ScheduleRunsMsg
+  | TaskInterruptedMsg;
 
 // ---- 命令（前端 → Python）----
 export type Command =
@@ -644,6 +662,8 @@ export type Command =
   | { v: 1; type: "skill.market_remove"; name: string }
   | { v: 1; type: "skill.ct_verify"; name: string }
   | { v: 1; type: "skill.ct_anchor"; name: string }
+  | { v: 1; type: "task.interrupted_list" }
+  | { v: 1; type: "task.interrupted_dismiss"; run_id: string }
   | { v: 1; type: "schedule.list" }
   | { v: 1; type: "schedule.save"; job: ScheduleJobDraft }
   | { v: 1; type: "schedule.delete"; job_id: string }

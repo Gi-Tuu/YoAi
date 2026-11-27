@@ -15,15 +15,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from yoai.shared_state import SharedJsonFile, synced
 
-class PersonalContext:
+
+class PersonalContext(SharedJsonFile):
     """个人事实的键值存储。键区分大小写，值可为任意 JSON 可序列化对象。"""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._facts: dict[str, dict[str, Any]] = {}
-        self._load()
+        self._init_shared()   # 多会话共享同一文件：读写前自动同步（见 shared_state.py）
+
+    def _reset_state(self) -> None:
+        self._facts = {}
 
     def _load(self) -> None:
         if not self.path.exists():
@@ -57,7 +62,9 @@ class PersonalContext:
         finally:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
+        self._mark_saved()
 
+    @synced
     def remember(self, key: str, value: Any, *, tag: str = "") -> str:
         """记住一条个人事实。key 为名称，value 为内容，tag 可选分类。"""
         now = datetime.now(timezone.utc).isoformat()
@@ -71,11 +78,13 @@ class PersonalContext:
         self._save()
         return f"已记住：{key}"
 
+    @synced
     def recall(self, key: str) -> Any | None:
         """按 key 取回个人事实，不存在返回 None。"""
         entry = self._facts.get(key)
         return entry["value"] if entry else None
 
+    @synced
     def forget(self, key: str) -> bool:
         """删除一条个人事实，返回是否确实删掉。"""
         existed = self._facts.pop(key, None) is not None
@@ -83,10 +92,12 @@ class PersonalContext:
             self._save()
         return existed
 
+    @synced
     def list_all(self) -> dict[str, Any]:
         """列出全部个人事实（仅返回 value，不含元数据）。"""
         return {k: v["value"] for k, v in self._facts.items()}
 
+    @synced
     def count(self) -> int:
         """统计已记住的事实条数。"""
         return len(self._facts)

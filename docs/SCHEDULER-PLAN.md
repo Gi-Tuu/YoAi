@@ -1,6 +1,6 @@
 # Event & Scheduler 设计方案（草案 · 待拍板）
 
-> 2026-11-27 起草。状态：**S1 / S1.1 / S2 / S3 已写完**（默认关闭，`YOAI_SCHEDULER=1` 开启）；S4 方案见 `SCHEDULER-S4-UI-PLAN.md`，S5 未做。见第 15、16 节。
+> 2026-11-27 起草。状态：**S1–S5 已写完**（默认关闭，`YOAI_SCHEDULER=1` 开启）；S4 见 `SCHEDULER-S4-UI-PLAN.md`，S5 见第 17 节。
 > 目标：补上 README "尚未实现"第一项——让 YoAi 从"只会回答"变成"会主动做事"。
 
 ---
@@ -326,3 +326,65 @@ YoAi 的权限白名单按工具名判断，所以拆成 6 个工具：
 
 **已知局限**：工具改动后界面靠 `schedule.state` 刷新；S4 前端页已实现并通过组件测试，
 但尚未做 GUI 目视。定时运行仍不采集执行证据，RSI 暂用不上这些样本。
+
+## 17. S5 交付状态（2026-11-27 下午）
+
+### 0 · 修复：多会话共享记忆互相覆盖（先于 S5 发现的真 bug）
+
+**现象**：每个会话的 agent 各自 new 一个 `PersonalContext` / `GoalManager` / `TemporalMemory`，
+都指向共享文件，但只在构造时读一次。已复现："记住我住在杭州"之后，定时任务会话（更早构造、一直缓存）
+再写一条事实，文件里只剩后者；普通会话新建的目标，定时任务会话也看不到（"目标停滞"对新目标永远不触发）。
+这个问题在调度器之前就存在（两个会话来回切着用即可触发），调度器让它更常见。
+
+**修复**：新增 `src/yoai/shared_state.py`——同一进程内同一文件共用 `RLock` + 版本号；每次读写前比较
+（版本号, 文件 mtime/大小），变了就重新加载；写在锁内"重载 → 修改 → 保存"。mtime 用来发现其他进程的修改。
+三个类只加了混入类和 `@synced` 装饰器，业务逻辑未改。`tests/test_shared_state.py` 8 项；原有
+`test_state.py` 7 项、`test_temporal_memory.py` 17 项在沙箱复跑通过。
+
+### 1 · 目标事件
+
+`goals.py` 增加进程级监听（`add_goal_listener`）：任何会话 `create_goal` → `goal_created`，
+`set_status` 状态真的变了 → `goal_status_changed`（带 `old_status`）。调度器启动时注册、停止时取消；
+回调可能在工作线程，只投递到事件循环。用户正在对话时事件进入等待，对话结束后运行（同一任务多次事件合并为最后一次）。
+**防自激**：定时任务运行期间、由定时任务会话自己改的目标不触发事件。目标停滞检查借助第 0 项读到最新数据。
+
+参照 OpenClaw：其"事件触发"是给时间调度加一个条件脚本（返回 fire 才运行，可持久化 state）。YoAi 的目标事件是进程内
+直接通知，不需要轮询脚本；`params` 等值过滤（如 `{"status": "done"}`）相当于简化的条件。
+
+### 2 · 对话中断恢复
+
+`src/yoai/inflight.py`：每轮对话开始写入 `runs/inflight.json`，正常结束（完成 / 失败 / 用户点停止）删除；
+关应用 / 崩溃 / 被杀没来得及收尾的，下次启动变为"被打断"（最多 5 条、7 天）。runtime 在 `hello` 后推
+`task.interrupted`；聊天页显示横幅：原会话里「重新发送」（用同样的输入**重新发起一轮**），别的会话里先「切到该会话」，或「忽略」。
+OpenClaw 重启后能接着跑被打断的轮次 [restart-recovery]；**Core 没有断点接口，YoAi 不假装能从中间继续**。
+
+### 3 · 每次运行用全新上下文
+
+`scheduler/memory_window.py`：专用会话的 memory 套一层窗口，运行期间 `history()` 只返回本次运行开始之后的消息，
+结束后恢复完整视图（界面照常显示全部结果）。对应 OpenClaw isolated 任务"每次新会话"，但保留一个统一的结果会话方便回看。
+个人事实 / 目标 / 事件记忆照常共享。`YOAI_SCHEDULER_FRESH=0` 可关闭。
+
+### 4 · 定时运行采集证据
+
+定时运行用与对话同一套 `ExecutionEvidenceCollector` → `EvidenceStore` → `AttributionEngine`；
+`task` 带「[定时任务 · 名称]」前缀以便区分，指纹只按任务内容算；`RunRecord.evidence_id` 回填。
+证据失败只记日志，不影响运行。边界看板 / RSI 从此能用上定时运行的样本。
+
+### 改动与验证
+
+| 文件 | 内容 |
+|---|---|
+| `shared_state.py`（新）/ `context.py` / `goals.py` / `temporal_memory.py` | 第 0 项 + 目标监听 |
+| `inflight.py`（新） | 第 2 项 |
+| `scheduler/memory_window.py`（新）/ `scheduler/host.py` | 第 1、3、4 项 |
+| `yoai_runtime.py`（5 份已同步） | memory 包装、证据库、inflight 登记 / 收尾、`task.interrupted*` 命令 |
+| 前端 `InterruptedBanner.tsx`（新）/ `App.tsx` / `types` / `ipc` / CSS | 第 2 项横幅 |
+| 测试 | `test_shared_state.py` 8、`test_inflight.py` 6、`test_scheduler_s5.py` 10、`test_runtime_inflight.py` 3、前端 `interrupted-banner.test.tsx` 5 |
+
+沙箱通过：`test_shared_state` 8、`test_inflight` 6、`test_scheduler_s5` 10、`test_scheduler_host` 13、`test_scheduler_tools` 10（+2 需 Core 跳过）、
+原 `test_state` 7、`test_temporal_memory` 17；另用真实 `yoai_runtime.py` + 替身跑通"关应用 → 下次提示 → 忽略 / 用户停止不算 / 正常完成不留"。
+
+**本机验证（2026-11-27 18:52）**：Python 全量 **420 passed, 3 skipped**（含 S5 全部用例）；
+前端 **41 passed**（新增 `interrupted-banner` 5 项）；`npm run typecheck` / `npm run build` 通过；
+runtime 五副本 hash 一致。**仍未验证**：真实模型下的第 3 项（运行窗口依赖 Core 每轮从
+`history()` 读上下文）与 S4 GUI 目视。

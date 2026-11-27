@@ -128,6 +128,8 @@ class Runtime:
         self.router: Any = None            # ExpertRouter（trial scope 覆盖）
         self.run_evidence: dict[str, str] = {}  # run_id -> evidence_id（反馈绑定用）
         self.scheduler: Any = None         # SchedulerHost（定时任务；YOAI_SCHEDULER=1 开启）
+        self.inflight: Any = None          # InflightTurns（S5-2：被打断的对话轮次）
+        self._user_cancelled: set[str] = set()   # 用户主动停止的 run（不算"被打断"）
         self._write_lock = asyncio.Lock()
 
     # ---- 输出 ----
@@ -209,7 +211,8 @@ class Runtime:
             agent_kwargs=agent_kwargs_base,
             agent_kwargs_for_session=kwargs_for_session,
             memory_dir_for_session=memory_dir_for_session,
-            memory_for_session=lambda sid, store: ConversationMemory(store, self.actions, sid),
+            memory_for_session=lambda sid, store: self._wrap_memory(
+                sid, ConversationMemory(store, self.actions, sid)),
         )
         # 首次启动（数据目录为空）必须建初始会话——旧端 app.py main() 语义，
         # 否则 current_agent() 会 KeyError，新用户第一句话就失败。
@@ -226,6 +229,7 @@ class Runtime:
                     fallback_request=self._request_host,
                     on_history_changed=self._push_snapshot,
                     log=_log,
+                    evidence_store=lambda: self.evidence_store,
                 )
             except Exception as exc:  # noqa: BLE001
                 _log(f"scheduler init failed: {exc}")
@@ -253,6 +257,26 @@ class Runtime:
         except Exception as exc:  # noqa: BLE001
             _log(f"evidence store init failed: {exc}")
             self.evidence_store = None
+
+        # 被打断的对话轮次（S5-2）：上次进程没来得及收尾的轮次在这里变成"被打断"
+        try:
+            from yoai.inflight import InflightTurns
+            self.inflight = InflightTurns(data_dir)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"inflight init failed: {exc}")
+            self.inflight = None
+
+    def _wrap_memory(self, session_id: str, memory: Any) -> Any:
+        if self.scheduler is not None:
+            try:
+                return self.scheduler.wrap_memory(session_id, memory)
+            except Exception as exc:  # noqa: BLE001
+                _log(f"scheduler wrap_memory failed: {exc}")
+        return memory
+
+    async def _push_interrupted(self) -> None:
+        items = self.inflight.interrupted() if self.inflight is not None else []
+        await self.send({"v": PROTOCOL_VERSION, "type": "task.interrupted", "items": items})
 
     async def _request_host(self, kind: str, payload: dict[str, Any]) -> Any:
         """SidecarChannel 回调：把审批/澄清发到前端并等待回答。"""
@@ -686,6 +710,14 @@ class Runtime:
             await self.send(status(task_id, run_id, -1, "failed", msg))
             return
 
+        if self.inflight is not None:
+            try:
+                current = self.sessions.current if self.sessions is not None else None
+                self.inflight.start(run_id, task_id=task_id, session_id=self._session_id(),
+                                    session_name=getattr(current, "name", ""), user_input=user_input)
+            except Exception as exc:  # noqa: BLE001
+                _log(f"inflight start failed: {exc}")
+
         self._active_task_id, self._active_run_id = task_id, run_id
         self.seq.reset_run(task_id, run_id)
         self.stream_text[run_id] = ""
@@ -693,6 +725,7 @@ class Runtime:
                                "running"))
 
         async def _run() -> None:
+            keep_inflight = False   # 被关应用 / 进程退出打断时保留记录，下次启动提示
             # 让文件操作记录带上本轮 run_id（产物/改动卡片按轮次分组）
             ctx = getattr(self.agent, "change_context", None)
             if isinstance(ctx, dict):
@@ -784,6 +817,8 @@ class Runtime:
                     else:
                         await self.send(event(task_id, run_id, seq, name, data))
             except asyncio.CancelledError:
+                keep_inflight = run_id not in self._user_cancelled
+                self._user_cancelled.discard(run_id)
                 await self.send(status(task_id, run_id,
                                        self.seq.for_run(task_id, run_id),
                                        "cancelled"))
@@ -798,6 +833,11 @@ class Runtime:
             finally:
                 self.stream_text.pop(run_id, None)
                 self.think_buffer.pop(run_id, None)
+                if self.inflight is not None and not keep_inflight:
+                    try:
+                        self.inflight.finish(run_id)
+                    except Exception as exc:  # noqa: BLE001
+                        _log(f"inflight finish failed: {exc}")
             # 证据落盘（旁路，失败不影响任务结果；旧端 worker.py 语义）
             if collector is not None and self.evidence_store is not None:
                 try:
@@ -874,6 +914,7 @@ class Runtime:
     def cancel_task(self, task_id: str, run_id: str) -> None:
         task = self.tasks.get(run_id)
         if task and not task.done():
+            self._user_cancelled.add(run_id)   # 用户点停止：正常结束，不算"被打断"
             task.cancel()
 
     # ---- 命令分发 ----
@@ -895,6 +936,15 @@ class Runtime:
                     await self.scheduler.start()
                 except Exception as exc:  # noqa: BLE001
                     _log(f"scheduler start failed: {exc}")
+            await self._push_interrupted()
+        elif typ == "task.interrupted_list":
+            self._ensure_agent()
+            await self._push_interrupted()
+        elif typ == "task.interrupted_dismiss":
+            self._ensure_agent()
+            if self.inflight is not None:
+                self.inflight.dismiss(str(cmd.get("run_id", "")))
+            await self._push_interrupted()
         elif typ == "task.start":
             await self.start_task(task_id, run_id, str(cmd.get("input", "")))
         elif typ == "task.cancel":

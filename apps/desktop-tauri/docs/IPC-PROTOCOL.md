@@ -273,6 +273,16 @@
 `schedule.job_disabled {job}`、`schedule.runs {job_id, runs[]}`。
 **未开启时**：`list/state/runs` 照常回答（`enabled=false`，从磁盘只读，目录不存在不创建）；其余命令回 `schedule.ack ok=false`。
 
+### v1 追加（S5-2 被打断的对话轮次）
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `task.interrupted_list` | — | 回 `task.interrupted` |
+| `task.interrupted_dismiss` | `run_id` | 忽略这一条，回 `task.interrupted` |
+
+`hello` 之后 runtime 主动推一次 `task.interrupted {items[]}`；每项 `run_id/task_id/session_id/session_name/input/truncated/started_at/interrupted_at`。
+"重新发送"由前端用同样的 `input` 发新的 `task.start`（不是断点续跑）。
+
 ### 行为约定
 
 1. `task` 事件序列规则不变；`snapshot` 与 run 事件流相互独立。

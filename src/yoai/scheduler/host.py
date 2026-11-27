@@ -24,10 +24,12 @@ import copy
 import inspect
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from yoai.scheduler.engine import SchedulerEngine
+from yoai.scheduler.memory_window import RunWindowMemory
 from yoai.scheduler.models import (
     SCHEDULER_SESSION_NAME,
     Job,
@@ -112,6 +114,9 @@ class SchedulerHost:
         clock: Callable[[], Any] | None = None,
         tick_s: float = 30,
         provision: bool = True,
+        evidence_store: Any = None,          # S5-4：EvidenceStore，或返回它的 callable
+        collector_factory: Callable[[], Any] | None = None,
+        fresh_context: bool | None = None,   # S5-3：None = 读 YOAI_SCHEDULER_FRESH（默认开）
     ) -> None:
         self.root = Path(data_dir) / "scheduler"
         self.store = SchedulerStore(self.root)
@@ -124,6 +129,12 @@ class SchedulerHost:
         self._log = log or logging.getLogger("yoai.scheduler").info
         self._gate: UnattendedGate | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._evidence_store = evidence_store
+        self._collector_factory = collector_factory
+        if fresh_context is None:
+            fresh_context = os.environ.get("YOAI_SCHEDULER_FRESH", "1").strip() != "0"
+        self.fresh_context = bool(fresh_context)
+        self._remove_goal_listener: Callable[[], None] | None = None
         self.channel = channel_factory(self._request_host)
         self.engine = SchedulerEngine(
             self.store, self._run_job, clock=clock, is_busy=is_busy,
@@ -182,6 +193,12 @@ class SchedulerHost:
 
     def busy(self) -> bool:
         return self.engine.any_running()
+
+    def wrap_memory(self, session_id: str, memory: Any) -> Any:
+        """S5-3：给专用会话的 memory 套上运行窗口（runtime 在建该会话的 agent 时调用）。"""
+        if self.fresh_context and self.is_session(session_id) and not isinstance(memory, RunWindowMemory):
+            return RunWindowMemory(memory)
+        return memory
 
     def tool_specs(self) -> list[Any]:
         """S3：给每个会话的 agent 注册 schedule_* 工具。"""
@@ -256,9 +273,20 @@ class SchedulerHost:
         gate = UnattendedGate(extra=extra)
         self._gate = gate
         name = job.name if job is not None else record.job_name
+        task_text = f"[定时任务 · {name}]\n{prompt}"
         final_text, stream, status, errors = "", "", None, []
+        memory = getattr(getattr(agent, "core", None), "memory", None)
+        window = memory if isinstance(memory, RunWindowMemory) else None
+        if window is not None:
+            window.begin()                     # 本次运行看不到之前运行的对话
+        collector = self._make_collector()
         try:
-            async for ev in agent.astream(f"[定时任务 · {name}]\n{prompt}"):
+            async for ev in agent.astream(task_text):
+                if collector is not None:
+                    try:
+                        collector.observe(ev)
+                    except Exception:  # noqa: BLE001 - 证据是旁路，坏了就不采
+                        collector = None
                 ev_name = _event_name(ev)
                 data = dict(getattr(ev, "data", {}) or {})
                 if ev_name == "delta":
@@ -274,10 +302,13 @@ class SchedulerHost:
                     status = str(data.get("status", "ok"))
         finally:
             self._gate = None
+            if window is not None:
+                window.end()
             try:
                 self.sessions.touch(self.session_id, delta=2)
             except Exception:  # noqa: BLE001
                 pass
+        evidence_id = self._record_evidence(collector, agent, task_text, prompt) if collector else ""
 
         text = self._clean(final_text if final_text.strip() else stream).strip()
         ok = status == "ok" and bool(text)
@@ -287,7 +318,61 @@ class SchedulerHost:
             text = f"{text}\n（错误：{'；'.join(errors)}）"
         if status is None and not errors:
             text = f"{text}（未收到完成事件）"
-        return RunResult(ok=ok, summary=text, denied_tools=list(gate.denied))
+        return RunResult(ok=ok, summary=text, denied_tools=list(gate.denied), evidence_id=evidence_id)
+
+    # ================= 证据（S5-4） =================
+    def _store(self) -> Any:
+        store = self._evidence_store
+        return store() if callable(store) else store
+
+    def _make_collector(self) -> Any:
+        if self._store() is None:
+            return None
+        try:
+            if self._collector_factory is not None:
+                return self._collector_factory()
+            from yoai.evidence import ExecutionEvidenceCollector
+            return ExecutionEvidenceCollector()
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"scheduler evidence collector failed: {exc}")
+            return None
+
+    @staticmethod
+    def _fingerprint(prompt: str) -> tuple[str, tuple[str, ...]]:
+        from yoai.evolution.fingerprint import fingerprint
+        fp = fingerprint(prompt)
+        return fp.key, tuple(fp.tags)
+
+    def _record_evidence(self, collector: Any, agent: Any, task_text: str, prompt: str) -> str:
+        """与对话同一套证据：边界看板 / 归因 / RSI 都能用上定时运行的样本。失败只记日志。"""
+        store = self._store()
+        if store is None:
+            return ""
+        try:
+            fp_key, fp_tags = self._fingerprint(prompt)   # 按任务内容算，不含「定时任务」前缀
+            provider = getattr(agent, "model", None)
+            decision = getattr(provider, "last_decision", None)
+            evidence = collector.finish(
+                session_id=self.session_id,
+                task=task_text,
+                task_fingerprint=fp_key,
+                fingerprint_tags=fp_tags,
+                sample_class="evolution",
+                expert_id=getattr(provider, "last_expert_id", None),
+                parent_id=getattr(provider, "last_parent_id", None),
+                usage_override=getattr(provider, "total_usage", None),
+                route_decision=decision.to_dict() if hasattr(decision, "to_dict") else None,
+            )
+            store.add(evidence)
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"scheduler evidence record failed: {exc}")
+            return ""
+        try:
+            from yoai.evidence import AttributionEngine
+            store.add_attribution(AttributionEngine(store).attribute(evidence))
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"scheduler attribution failed: {exc}")
+        return str(getattr(evidence, "id", ""))
 
     # ================= 消息 =================
     async def _emit(self, msg: dict[str, Any]) -> None:
@@ -332,6 +417,8 @@ class SchedulerHost:
             return
         self.started = True
         self._loop = asyncio.get_running_loop()
+        from yoai.goals import add_goal_listener
+        self._remove_goal_listener = add_goal_listener(self._on_goal_event)
         interrupted = await self.engine.startup()
         self.engine.start()
         if interrupted:
@@ -339,7 +426,40 @@ class SchedulerHost:
         await self.push_state()
 
     async def shutdown(self) -> None:
+        if self._remove_goal_listener is not None:
+            self._remove_goal_listener()
+            self._remove_goal_listener = None
         await self.engine.shutdown()
+
+    # ================= 目标事件（S5-1） =================
+    def _on_goal_event(self, event: str, goal: dict[str, Any], manager: Any, **extra: Any) -> None:
+        """GoalManager 的回调：可能在工作线程里被调用，所以只投递到事件循环。"""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        agents = getattr(self.sessions, "_agents", {}) or {}
+        own = agents.get(self.session_id)
+        if own is not None and getattr(own, "goals", None) is manager and self.engine.any_running():
+            return   # 定时任务自己改的目标不再触发事件任务，防止自己触发自己
+        payload = {
+            "goal_id": str(goal.get("id", "")),
+            "goal_title": str(goal.get("title", "")),
+            "status": str(goal.get("status", "")),
+            "old_status": str(extra.get("old_status", "")),
+        }
+
+        def _schedule() -> None:
+            asyncio.ensure_future(self._emit_goal_event(event, payload))
+        try:
+            loop.call_soon_threadsafe(_schedule)
+        except RuntimeError:
+            pass
+
+    async def _emit_goal_event(self, event: str, payload: dict[str, Any]) -> None:
+        try:
+            await self.engine.emit(event, **payload)
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"scheduler goal event failed: {exc}")
 
     # ================= 命令 =================
     def _job_from_command(self, raw: Any) -> Job:

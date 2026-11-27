@@ -660,3 +660,14 @@ button.primary { background: var(--brick); color: var(--on-accent); border-color
 .sched-summary { margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
 .sched-denied { margin-top: 4px; font-size: var(--fs-cap); color: var(--bad); }
 @media (max-width: 860px) { .sched-layout { grid-template-columns: 1fr; } }
+
+/* ---- 上次被打断的对话（S5-2） ---- */
+.interrupted-banner { margin: 0 var(--sp-3) var(--sp-2); border: 1px solid var(--warn); background: var(--surface); }
+.interrupted-item { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: 6px 10px; font-size: var(--fs-note); }
+.interrupted-item + .interrupted-item { border-top: 1px solid var(--rule); }
+.interrupted-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.interrupted-text b { color: var(--warn); font-weight: 500; }
+.interrupted-dim { color: var(--dim); font-size: var(--fs-cap); }
+.interrupted-input { word-break: break-all; }
+.interrupted-actions { display: flex; gap: 6px; flex-shrink: 0; }
