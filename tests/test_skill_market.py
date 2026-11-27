@@ -132,7 +132,7 @@ def test_install_dependencies_uses_lock_and_venv(tmp_path, monkeypatch):
     def fake_run(command, **_kwargs):
         calls.append(command)
         if "-m" in command and "venv" in command:
-            venv_py = installed / ".venv" / "Scripts" / "python.exe"
+            venv_py = SkillMarket._venv_python(installed / ".venv")
             venv_py.parent.mkdir(parents=True, exist_ok=True)
             venv_py.write_bytes(b"")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")

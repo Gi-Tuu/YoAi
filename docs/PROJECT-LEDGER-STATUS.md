@@ -2,15 +2,16 @@
 
 > 2026-11-23 建立。只记录当前事实，不写计划（待办见 `PROJECT-LEDGER-PLAN.md`）。
 
-## 当前快照（2026-11-26 20:40）
+## 当前快照（2026-11-27 13:55）
 
 - **成绩**：权威仍为单轮递增+不截断+全量 500 题 **87.2%（436/500）**，CI 84.0–89.8%；评测口径未随产品扩展改变。
-- **桌面**：Tauri 2 是唯一入口，Python runtime 走 IPC v1；消息动作/附件/项目模式/右侧三格工具面板已落地。全量 **324 passed + 1 skipped**，前端 **28 passed**，exe 已重打包（sha256 `35501023…`）。
+- **桌面**：Tauri 2 是唯一入口，Python runtime 走 IPC v1；消息动作/附件/项目模式/右侧三格工具面板已落地。全量 **377 passed + 3 skipped**（含定时任务 53 项），前端 **28 passed**，exe 已重打包（sha256 `35501023…`）。
 - **RSI**：R0 反馈信号 → R1 边界看板 → R2.1 shadow 触发 → R2.2 child/parent 隔离验证 → R3.1/3.2/3.3 晋升·试用·回滚 → R4 元策略 → **R5 远端 CT 回执** 全链落地；improved 只进 probation，probation→active 必须人工批准，retired 为终态；**真实数据收益仍在观察期**。
 - **扩展体系**：MCP 支持 stdio/Streamable HTTP/GET SSE 与管理页；Skill 支持脚本包/资源包/强制白名单/requirements+lockfile/本地与远程市场/自动 venv 依赖/RSI candidate/签名链/远端 CT。所有扩展工具走 Core 权限审批。
 - **安全边界**：自动触发默认关；R4 元策略只改阈值权重不改安全边界；远端 CT 公钥只信 catalog；`ct_anchor` 显式调用，不自动提交公网；签名/依赖安装隔离，失败拒绝安装。
+- **定时任务**：S1/S1.1/S2 已写入 `feature/scheduler`（PR #1，默认关闭，`YOAI_SCHEDULER=1` 开启）；13:52 用真实 Core + 真实模型跑通一次性任务，`state=ok`、无审批弹窗、无被拒工具。S4 前端方案与实机 smoke 清单已落文档，**未写前端代码**。
 - **GUI 验证**：R5 技能页 20:37 目视确认通过——CT 状态、包 sha256/回执指纹、校验/锚定按钮与本地透明日志展示正常；无代码改动。
-- **下一步**：见 `PROJECT-LEDGER-PLAN.md`；仅剩真实数据观察与公网 CT 服务范围决策。
+- **下一步**：见 `PROJECT-LEDGER-PLAN.md`；优先 PR #1 review/merge 与 S4 前端定时页，RSI 真实数据继续观察。
 
 ## A. 成绩与评测
 
