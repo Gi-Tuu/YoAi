@@ -86,3 +86,17 @@ python -m yoai.scheduler --data-dir "$YOAI_DATA_DIR" runs
 
 结论：S3 的创建与列出链路在真模型下可用；写工具弹窗、读工具免弹窗的边界符合设计。
 该验证只创建任务，没有等待 20 分钟触发；定时执行链路由第 1 节 smoke 覆盖。
+
+## 6. S5 新上下文真模型对照（2026-11-27 19:10）
+
+同一专用会话里放两个任务：`marker` 只输出 `YOAI-FRESH-MARKER-7788`；
+`checker` 只看当前对话上下文，不调用记忆工具，回答是否看到上一轮助手回复里的大写英文+数字标记。
+用 `schedule.run_now` 依次触发，分别做两组：
+
+| 配置 | marker 输出 | checker 输出 | 结论 |
+|---|---|---|---|
+| `YOAI_SCHEDULER_FRESH=1`（默认） | `YOAI-FRESH-MARKER-7788` | **没看到标记** | 新上下文生效，第二次运行看不到第一次 |
+| `YOAI_SCHEDULER_FRESH=0`（对照） | `YOAI-FRESH-MARKER-7788` | **看到标记** | 关闭窗口后能看到历史，证明差异来自 `RunWindowMemory` |
+
+结论：S5 的「每次运行用新上下文」在真实模型下按开关正确工作；个人事实/目标/事件记忆仍跨运行共享，
+不在本验证范围内。

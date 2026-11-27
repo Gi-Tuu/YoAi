@@ -388,5 +388,5 @@ S5 已由 PR #3 squash 合并进 `master`（提交 `296bdec`）。
 
 **本机验证（2026-11-27 18:52）**：Python 全量 **420 passed, 3 skipped**（含 S5 全部用例）；
 前端 **41 passed**（新增 `interrupted-banner` 5 项）；`npm run typecheck` / `npm run build` 通过；
-runtime 五副本 hash 一致。**仍未验证**：真实模型下的第 3 项（运行窗口依赖 Core 每轮从
-`history()` 读上下文）与 S4 GUI 目视。
+runtime 五副本 hash 一致。第 3 项已用真模型对照验证：`FRESH=1` 下 checker 回答「没看到标记」，
+`FRESH=0` 下回答「看到标记」，见 `SCHEDULER-SMOKE-CHECKLIST.md` 第 6 节。**仍未验证**：S4 GUI 目视。
