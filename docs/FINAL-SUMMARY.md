@@ -159,7 +159,7 @@ bug 修复 + 全量 500 题，即真实对话形态的最终成绩。
    需带上下文的结构化抽取（专门立项），非 quick fix。详见 `ASSISTANT-WEAKNESS.md`。
 3. **judge 非官方 gpt-4o**：如需榜单可比成绩，需 OpenAI key 重跑评分（唯一无法靠免费额度解决）。
 4. **进化机制价值未证实（暂停，待后续研究）**：接线技术完成；低温底座重验后 D 仍<A
-   （66.7%<73.3%），限制工具集仍是负收益。**用户明确要求不关闭此线，后续再研究**。
+   （66.7%<73.3%），限制工具集仍是负收益。**项目所有者（你）明确不关闭此线，后续再研究**。
 5. **M3 最高性能模式未实现**：按约定应在 YoAi 内覆盖，不动原项目。
 
 ## 八、复现入口
@@ -217,7 +217,7 @@ exe 22:38 重打包自检通过。
 
 ---
 
-## 十、2026-11-25 ~ 11-26 桌面端与扩展体系（当前状态）
+## 十、2026-11-25 ~ 11-27 桌面端、扩展体系与定时任务（当前状态）
 
 主体评测结束后，产品层进入「桌面可用性 + 可进化 + 可扩展」阶段。成绩口径不变，
 以下均为工程与产品能力，不覆盖第 2/8 节的 87.2% 权威分数。
@@ -228,8 +228,9 @@ exe 22:38 重打包自检通过。
 | 消息交互 | 附件文本抽取；用户专有=编辑/撤回提问，智能体专有=重新生成/停止/思考/产物，两者都有=复制/分享；撤回/编辑为软删除+分支，不改写 Core 历史 | `MESSAGE-ACTIONS-DESIGN.md` |
 | RSI 闭环 | R0 反馈信号 → R1 能力边界看板 → R2.1 shadow 触发 → R2.2 child/parent 隔离验证 → R3.1/3.2/3.3 晋升·试用·人工批准·回滚 → R4 元策略 → R5 远端 CT；自动触发默认关，improved 只进 probation，retired 终态 | `RSI-PRODUCT-RESEARCH.md` / `RSI-PROMOTION-PLAN.md` / `RSI-META-RECURSION.md` / `SKILL-SUPPORT.md` |
 | 扩展体系 | MCP 走标准 JSON-RPC（stdio + Streamable HTTP + GET SSE）与桌面管理页；Skill 支持脚本包/资源包/强制工具白名单、requirements/lockfile、本地与远程市场、自动 venv 依赖、安装后自动建 RSI candidate | `MCP-SUPPORT.md` / `SKILL-SUPPORT.md` |
+| 定时任务（S1–S5） | 默认开启、开箱即食：`YOAI_SCHEDULER=0` 可显式关闭，预置心跳默认关。对话工具 `schedule_*`、桌面「定时」页、目标事件、中断提示、每次运行新上下文、定时运行证据均已落地并通过真模型验证 | `SCHEDULER-PLAN.md` / `SCHEDULER-S4-UI-PLAN.md` / `SCHEDULER-SMOKE-CHECKLIST.md` |
 | 安全边界 | 插件/MCP/Skill 工具全部走 Core 权限审批；签名链 root→signer；远端 CT 公钥只信 catalog，回执自带公钥不一致即拒绝；安装前复验 sha256/签名/Merkle proof；`ct_anchor` 必须显式调用 | `SKILL-SUPPORT.md` / `RSI-META-RECURSION.md` |
-| 工程状态 | Python 324 passed + 1 skipped，前端 28 passed；runtime 五副本 hash 一致；dist exe 已重打包（sha256 `35501023…`）；提交 `84d273c` 已 push | `PROJECT-LEDGER-STATUS.md` |
+| 工程状态 | Python 420 passed + 3 skipped，前端 41 passed；runtime 五副本 hash 一致；dist exe 已重打包（sha256 `7aa60dd4…`）；PR #1–#4 全部合并进 master | `PROJECT-LEDGER-STATUS.md` |
 
 **当前判断**：架构骨架和工程闭环已经齐备，RSI 的产品收益仍需真实使用数据验证；
 边界看板某标签样本 ≥20 且状态 weak 才生成候选，没有 weak 不硬造候选。

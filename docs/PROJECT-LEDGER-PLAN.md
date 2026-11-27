@@ -70,7 +70,7 @@
 
 ### 2026-11-27 · 已关闭的事项
 
-- 定时任务 S1/S1.1/S2：默认关闭，五份 runtime 同步，全量 377 passed + 3 skipped；
+- 定时任务 S1/S1.1/S2：五份 runtime 同步，默认开启（`YOAI_SCHEDULER=0` 可显式关闭）；当时全量 377 passed + 3 skipped；
   13:52 真实 Core + 真实模型一次性任务 smoke 通过（`state=ok`，无弹窗/无被拒工具）。
   PR #1 已 squash 合并进 `master`（`67542be`）；CI 曾因 Linux venv 路径假设失败，
   已用 `41f28a9` 修正测试后 CI pass。

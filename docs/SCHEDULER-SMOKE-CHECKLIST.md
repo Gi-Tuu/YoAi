@@ -2,7 +2,7 @@
 
 > 验证目标：S1/S1.1/S2 在**真实 Core + 真实模型**下能触发、执行、回传结果。
 > 2026-11-27 19:56 起定时任务默认开启；下文 `YOAI_SCHEDULER=1` 是显式写法，等价于默认。
-> 默认关闭，验证完请删除/停用测试任务，正常桌面路径不受影响。
+> 默认开启但预置任务全关，验证完请删除/停用测试任务，正常桌面路径不受影响。
 
 ## 1. 已完成的 headless smoke（2026-11-27 13:51–13:52）
 
@@ -59,7 +59,7 @@ python -m yoai.scheduler --data-dir "$YOAI_DATA_DIR" runs
 
 | 现象 | 先查什么 |
 |---|---|
-| 没有 `schedule.state` | 是否设了 `YOAI_SCHEDULER=1`；runtime 日志里 `scheduler init failed` |
+| 没有 `schedule.state` | 是否设了 `YOAI_SCHEDULER=0` 导致关闭；runtime 日志里 `scheduler init failed` |
 | 任务不触发 | 数据目录是否和 CLI 一致；`next_fire_at` 是否已过；`active_hours` 是否在窗口外 |
 | 触发但没结果 | `runs` 里的 `state` / `summary`；网关错误；是否没有收到 `done` 事件 |
 | `state=failed` 且 `denied_tools` 非空 | prompt 用了白名单外工具；这是安全设计，不是 bug |

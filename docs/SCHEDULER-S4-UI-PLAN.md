@@ -1,6 +1,6 @@
 # S4 前端「定时」页方案（2026-11-27）
 
-> YoAi 侧扩展，Core 零改动。状态：**代码已写（2026-11-27 下午）**，前端测试 / typecheck / build 已在本机通过，GUI 目视待做，见文末第 8 节。
+> YoAi 侧扩展，Core 零改动。状态：**已交付（2026-11-27）**——代码、前端测试 / typecheck / build、GUI 目视均通过，见文末第 8 节。
 > 前置：S1/S1.1/S2 已在 master；定时任务默认开启，开箱即食；`YOAI_SCHEDULER=0` 可显式关闭。
 
 ## 1. 目标
@@ -144,4 +144,5 @@ schedule.runs       {job_id, runs}
 
 **验证口径（2026-11-27 本机）**：Python 侧 `test_scheduler_host.py` 13 项通过；
 `npm run typecheck && npm test && npm run build` 全绿，前端 **36 passed**（新增 8 项 scheduler-page 测试）。
-协议 smoke 另验证调度器 ON/OFF 分别返回 `enabled=true/false`。GUI 目视仍待做。
+协议 smoke 另验证调度器 ON/OFF 分别返回 `enabled=true/false`。21:10 GUI 目视通过：开启态按钮可用、
+预置任务与运行记录正常，页头按钮与窗口控件重叠已修复。

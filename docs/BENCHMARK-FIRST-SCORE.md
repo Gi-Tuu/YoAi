@@ -108,7 +108,7 @@ python bench/score_longmemeval.py --hyp bench_results/lme-oracle-full500-v2/hypo
 
 ## 根因修复：生产适配器（2026-11-21 第三轮）
 
-用户澄清"Core 允许合理改动"后重新审视根因——**结论是 Core 不需要改，改在适配器层**：
+项目所有者（你）澄清"Core 允许合理改动"后重新审视根因——**结论是 Core 不需要改，改在适配器层**：
 
 - **Core 的伪工具调用 fail-closed 是正确安全机制**（`protocol.py:12`、`react.py:167-186`）：
   模型把 `<tool_call>` 写进正文时既不能当答案展示、也不能解析执行。弱化它等于给假调用开后门，
