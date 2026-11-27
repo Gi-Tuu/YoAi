@@ -254,6 +254,25 @@
 真实任务命中 running trial 时，主证据标 `trial/child`，后台用隔离 agent 跑 parent 并落 `trial/parent`；
 两侧证据带同一 `trial_id`，不推 UI 事件。active 节点每次真实任务后自动跑回归监控。
 
+### v1 追加（定时任务 S2 / S4）
+
+由 `src/yoai/scheduler/host.py` 处理；未设 `YOAI_SCHEDULER=1` 时 runtime 只读回答。
+
+| type | 字段 | 行为 |
+|---|---|---|
+| `schedule.list` / `schedule.state` | — | 回 `schedule.state` |
+| `schedule.save` | `job` | 新建（不带 id）或编辑（带 id，只合并可编辑字段）；回 `schedule.ack` + `schedule.state` |
+| `schedule.delete` | `job_id` | 删除任务（运行记录保留） |
+| `schedule.toggle` | `job_id`,`enabled` | 暂停 / 恢复 |
+| `schedule.run_now` | `job_id` | 立即额外运行一次，不改变原定时间 |
+| `schedule.cancel` | `job_id` | 停止正在进行的运行 |
+| `schedule.runs` | `job_id?`,`limit?` | 回 `schedule.runs`；`job_id` 为空 = 全部任务 |
+
+消息：`schedule.state {enabled, jobs[], session_id, session_name}`（`jobs[]` 额外带 `schedule_text/running/waiting`）、
+`schedule.ack {command, ok, message}`、`schedule.run_started|run_finished|run_interrupted {run}`、
+`schedule.job_disabled {job}`、`schedule.runs {job_id, runs[]}`。
+**未开启时**：`list/state/runs` 照常回答（`enabled=false`，从磁盘只读，目录不存在不创建）；其余命令回 `schedule.ack ok=false`。
+
 ### 行为约定
 
 1. `task` 事件序列规则不变；`snapshot` 与 run 事件流相互独立。

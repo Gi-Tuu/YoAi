@@ -47,6 +47,7 @@ _SMART_ALLOWED = {
     "now", "recent_events", "list_tools",
     "file_ro_list", "file_ro_read",
     "proj_list", "proj_read",
+    "schedule_list", "schedule_runs",   # 只读；schedule_create/cancel/toggle/run_now 弹窗
 }
 
 
@@ -105,6 +106,8 @@ def agent_kwargs(data_dir=None, *, channel=None, auto_approve: bool = False) -> 
         "file_ro_list", "file_ro_read",
         # 项目读工具自动放行；proj_write/proj_patch 是写操作，不进白名单 → 弹窗确认
         "proj_list", "proj_read",
+        # 定时任务：只读的进白名单；建 / 删 / 暂停 / 立即运行都会持久化自主行为 → 弹窗确认
+        "schedule_list", "schedule_runs",
         # forget_fact / forget_event 是删除操作、shell_run 可执行命令：
         # 不进白名单，auto 档每次弹窗确认（默认拒绝）
     }

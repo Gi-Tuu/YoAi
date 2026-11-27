@@ -70,3 +70,19 @@ python -m yoai.scheduler --data-dir "$YOAI_DATA_DIR" runs
 - 心跳预置任务默认关闭；删掉后不会再自动出现。
 - cron 表达式需要额外安装 `croniter`；once/interval/daily/weekly 不需要。
 - 本清单只验证「应用打开时」的调度；应用关闭后不运行是 v1 明确范围外。
+
+## 5. S3 对话工具真模型验证（2026-11-27 15:44）
+
+用临时数据目录 + `YOAI_SCHEDULER=1` + 真实 `dist/runtime`，连续发两轮对话：
+
+1. 「请在 20 分钟后提醒我检查项目状态。提示词请写完整……」
+   - 收到 `approval.request`，工具=`schedule_create`，参数 `in_minutes=20`；
+   - 自动 reply `allow=true` 后收到 `tool_call` / `tool_result`（`ok=true`）；
+   - 任务落盘：id `88da835b`，名称「检查项目状态提醒」，一次性，16:04 触发；
+   - 最终回复明确给出任务名、id、时间与完整 prompt。
+2. 「列出我现在所有的定时任务，告诉我任务名和下次运行时间。」
+   - 模型调用 `schedule_list`；**没有审批弹窗**（只读工具进 smart 白名单）；
+   - 最终回复正确列出「主动检查」（暂停）与「检查项目状态提醒」（16:04）。
+
+结论：S3 的创建与列出链路在真模型下可用；写工具弹窗、读工具免弹窗的边界符合设计。
+该验证只创建任务，没有等待 20 分钟触发；定时执行链路由第 1 节 smoke 覆盖。

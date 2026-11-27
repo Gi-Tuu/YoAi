@@ -3,7 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Command, RuntimeMsg } from "../types/ipc";
+import type { Command, RuntimeMsg, ScheduleJobDraft } from "../types/ipc";
 import { PROTOCOL_VERSION } from "../types/ipc";
 
 type Listener = (msg: RuntimeMsg) => void;
@@ -288,6 +288,29 @@ export class IpcClient {
   }
   async anchorSkillCt(name: string): Promise<void> {
     await this.send({ v: PROTOCOL_VERSION, type: "skill.ct_anchor", name });
+  }
+
+  // ---- 定时任务（S4）----
+  async getScheduleState(): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "schedule.list" });
+  }
+  async saveScheduleJob(job: ScheduleJobDraft): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "schedule.save", job });
+  }
+  async deleteScheduleJob(jobId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "schedule.delete", job_id: jobId });
+  }
+  async toggleScheduleJob(jobId: string, enabled: boolean): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "schedule.toggle", job_id: jobId, enabled });
+  }
+  async runScheduleNow(jobId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "schedule.run_now", job_id: jobId });
+  }
+  async cancelScheduleRun(jobId: string): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "schedule.cancel", job_id: jobId });
+  }
+  async getScheduleRuns(jobId = "", limit = 20): Promise<void> {
+    await this.send({ v: PROTOCOL_VERSION, type: "schedule.runs", job_id: jobId, limit });
   }
 
   async shutdown(): Promise<void> {

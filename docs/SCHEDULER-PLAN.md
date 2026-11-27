@@ -1,6 +1,6 @@
 # Event & Scheduler 设计方案（草案 · 待拍板）
 
-> 2026-11-27 起草。状态：**S1 / S1.1 / S2 已写完**（默认关闭，`YOAI_SCHEDULER=1` 开启）；S3–S5 未做。见第 15 节。
+> 2026-11-27 起草。状态：**S1 / S1.1 / S2 / S3 已写完**（默认关闭，`YOAI_SCHEDULER=1` 开启）；S4 方案见 `SCHEDULER-S4-UI-PLAN.md`，S5 未做。见第 15、16 节。
 > 目标：补上 README "尚未实现"第一项——让 YoAi 从"只会回答"变成"会主动做事"。
 
 ---
@@ -280,3 +280,49 @@ YOAI_SCHEDULER=1 ./dist/YoAi.exe
 > 如果结果没出现，看看这两个目录里哪个出现了 `scheduler/` 子目录，再把 `--data-dir` 指过去。
 
 回退：把 `output/runtime_backup_20261127/source__yoai_runtime.py` 复制回 `apps/desktop-tauri/runtime/yoai_runtime.py`，再运行同步脚本。
+
+## 16. S3 交付状态（2026-11-27 下午）：对话里管理定时任务
+
+**对齐 OpenClaw**：OpenClaw 给智能体一个 `cron` 工具（add / list / run / remove，JSON 参数）。
+YoAi 的权限白名单按工具名判断，所以拆成 6 个工具：
+
+| 工具 | 权限 |
+|---|---|
+| `schedule_list` / `schedule_runs` | 只读，进 smart 白名单；无人值守也可用 |
+| `schedule_create` / `schedule_cancel` / `schedule_toggle` / `schedule_run_now` | 每次弹窗确认；无人值守**永不放行**（所有非只读 `schedule_*` 进黑名单） |
+
+有意的差异：一次性时间不带时区按**本地**理解（OpenClaw 按 UTC）；另有 `in_minutes`（"N 分钟后"），
+不让模型自己算时间；星期接受 `一,三,五` / `1-5` / `工作日` / `周末`；对话创建的任务上限 20 个；
+完全相同的任务不重复建（模型重试时常见）。工具说明要求 prompt 写成不依赖当前对话的完整指令。
+
+**改动**
+
+| 文件 | 内容 |
+|---|---|
+| `scheduler/tools.py`（新） | 6 个工具 + 时间 / 星期解析；工具函数同步、线程安全 |
+| `scheduler/engine.py` | ① **修并发 bug**：先登记运行再 await 通知，两个同时到达的触发不会把同一任务跑两次（有回归测试，且已确认旧代码会失败）；② `request_run()` 同步入队；③ 手动 / 中断重跑不推迟原定时间 |
+| `scheduler/store.py` | 任务表加 `RLock`（工具可能在工作线程里调用） |
+| `scheduler/policy.py` | `schedule_runs` 只读；非只读 `schedule_*` 一律永不无人值守 |
+| `scheduler/host.py` | `tool_specs()`、`notify_changed()`（任意线程可调，推一次 `schedule.state`） |
+| `agent.py` | 新参数 `extra_tool_specs`（列表或 callable），坏了只打日志不影响构造 |
+| `bootstrap.py` | `schedule_list` / `schedule_runs` 进 smart 白名单（两处名单都加） |
+| `yoai_runtime.py` | 所有会话的 agent 带 `schedule_*`（调度器未开启时为空）；调度器改为在第一个 agent 构造**之前**创建；5 份副本已同步 |
+| `tests/test_scheduler_tools.py`（新） | 12 项；`test_scheduler.py` +1 项并发回归 |
+
+**验证口径（2026-11-27 本机）**：`test_scheduler.py` 46 项、`test_scheduler_host.py` 13 项、
+`test_scheduler_tools.py` 12 项全部通过；Python 全量 **393 passed, 3 skipped**。
+真模型验证：对话「20 分钟后提醒我检查项目状态」触发 `schedule_create` 审批，allow 后任务
+`88da835b` 落盘；第二轮「列出定时任务」直接调用 `schedule_list`、无审批且回复正确。
+
+**本机验收**
+
+```bash
+"$PY" -m pytest tests/test_scheduler_tools.py tests/test_scheduler.py tests/test_scheduler_host.py -q
+"$PY" -m pytest -q
+# 实机：YOAI_SCHEDULER=1 启动后，在普通会话里说
+#   「20 分钟后提醒我喝水」→ 应弹窗确认 schedule_create → 确认后「⏰ 定时任务」会话里 20 分钟后出现结果
+#   「我有哪些定时任务？」→ 不弹窗，直接列出
+```
+
+**已知局限**：工具改动后界面靠 `schedule.state` 刷新；S4 前端页已实现并通过组件测试，
+但尚未做 GUI 目视。定时运行仍不采集执行证据，RSI 暂用不上这些样本。

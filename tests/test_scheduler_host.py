@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from yoai.scheduler.__main__ import main as cli_main  # noqa: E402
-from yoai.scheduler.host import CLARIFY_UNATTENDED, SchedulerHost  # noqa: E402
+from yoai.scheduler.host import CLARIFY_UNATTENDED, SchedulerHost, disabled_message  # noqa: E402
 from yoai.scheduler.models import SCHEDULER_SESSION_NAME, Job, Trigger  # noqa: E402
 from yoai.scheduler.store import SchedulerStore  # noqa: E402
 
@@ -286,3 +286,45 @@ def test_cli_add_list_enable_remove(tmp_path):
     assert cli_main(["--data-dir", str(data), "list"]) == 0
     assert cli_main(["--data-dir", str(data), "remove", jobs[0].id]) == 0
     assert SchedulerStore(data / "scheduler").list_jobs() == []
+
+
+# ---------------- S4：界面需要的状态 ----------------
+
+def test_state_carries_enabled_flag(tmp_path):
+    async def main():
+        host, _sessions, sent, _calls = make_host(tmp_path)
+        await host.push_state()
+        state = [m for m in sent if m["type"] == "schedule.state"][-1]
+        assert state["enabled"] is True and state["jobs"][0]["schedule_text"]
+    asyncio.run(main())
+
+
+def test_disabled_message_is_read_only_and_does_not_create_dirs(tmp_path):
+    empty = disabled_message(tmp_path / "nothing", "schedule.list", {})
+    assert empty == {"v": 1, "type": "schedule.state", "enabled": False, "jobs": [],
+                     "session_id": "", "session_name": SCHEDULER_SESSION_NAME}
+    assert not (tmp_path / "nothing" / "scheduler").exists()
+
+    data = tmp_path / "data"
+    assert cli_main(["--data-dir", str(data), "add", "--name", "命令行建的", "--prompt", "p",
+                     "--daily", "09:00"]) == 0
+    state = disabled_message(data, "schedule.state", {})
+    assert state["enabled"] is False and [j["name"] for j in state["jobs"]] == ["命令行建的"]
+    assert state["jobs"][0]["schedule_text"] == "每天 09:00" and state["jobs"][0]["running"] is False
+    runs = disabled_message(data, "schedule.runs", {"job_id": state["jobs"][0]["id"]})
+    assert runs["type"] == "schedule.runs" and runs["runs"] == []
+
+
+def test_save_rejects_unknown_id_and_ignores_stats_on_create(tmp_path):
+    async def main():
+        host, _sessions, sent, _calls = make_host(tmp_path)
+        await host.handle("schedule.save", {"job": {"id": "ghost", "name": "x", "prompt": "p",
+                                                    "trigger": {"kind": "daily", "time": "09:00"}}})
+        ack = [m for m in sent if m["type"] == "schedule.ack"][-1]
+        assert ack["ok"] is False and "找不到任务" in ack["message"]
+        await host.handle("schedule.save", {"job": {"name": "新", "prompt": "p", "created_by": "preset",
+                                                    "consecutive_failures": 9, "last_state": "ok",
+                                                    "trigger": {"kind": "daily", "time": "09:00"}}})
+        job = next(j for j in host.store.list_jobs() if j.name == "新")
+        assert job.created_by == "user" and job.consecutive_failures == 0 and job.last_state == ""
+    asyncio.run(main())
