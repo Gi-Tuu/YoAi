@@ -81,9 +81,9 @@
 - S5 共享记忆覆盖修复 / 目标事件 / 中断提示 / 新上下文 / 定时运行证据：Python 全量 420 passed / 3 skipped，
   前端 41 passed，typecheck/build 通过，runtime 五副本一致；PR #3 已 squash 合并进 `master`（`296bdec`）。
   新上下文真模型对照通过：`FRESH=1` 看不到上一轮、`FRESH=0` 看得到。
-- S4 GUI 目视：21:10 你确认通过；页头按钮与窗口控件重叠已修复，`dist/YoAi.exe` 重打包为 `7aa60dd4…`。
+- S4 GUI 目视：21:10 你确认通过；页头按钮与窗口控件重叠已修复，`dist/YoAi.exe` 重打包为 `7aa60dd4…`；PR #4 已 squash 合并进 `master`（`54edb82`）。
 
-## 当前待办（2026-11-27 21:12 口径）
+## 当前待办（2026-11-27 21:15 口径）
 
 上表 #3（进化机制重启）、#6（UI 美化）、#7（README 对外版）、#8（judge 换官方
 gpt-4o）仍有效；其中 #8 是唯一依赖外部 key 的项目。新增/细化的当前项：
